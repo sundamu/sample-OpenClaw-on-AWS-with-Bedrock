@@ -46,6 +46,8 @@ Deploy in 8 minutes. Access from your phone.
 
 ![CloudFormation Outputs](images/20260305-215111.png)
 
+> 🦞 **Just open the Web UI and say hi.** All messaging plugins (WhatsApp, Telegram, Discord, Slack, Feishu) are pre-installed. Tell your OpenClaw which platform you want to connect — it will guide you through the entire setup step by step. No manual configuration needed.
+
 ```bash
 # 1. Install SSM Session Manager Plugin (one-time)
 #    https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html

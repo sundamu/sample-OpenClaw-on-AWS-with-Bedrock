@@ -44,6 +44,8 @@
 
 ### 部署后操作
 
+> 🦞 **打开 Web UI，直接和 AI 说话就行。** 所有消息平台插件（WhatsApp、Telegram、Discord、Slack、飞书）已预装。告诉你的 OpenClaw 你想用什么方式连接，它会一步步指导你完成全部配置，无需手动操作。
+
 ```bash
 # 1. 安装 SSM Session Manager 插件（一次性）
 #    https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html

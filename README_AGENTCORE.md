@@ -141,6 +141,23 @@ A team agent can ask its members' agents for status updates. A department agent 
 
 ![OpenClaw Multi-Tenant Admin Console](images/20260305-214028.jpeg)
 
+### Try It Now
+
+```bash
+# Visual admin console (no AWS needed)
+python3 demo/console.py
+# Open http://localhost:8099
+
+# Terminal demo (7 scenarios)
+python3 demo/run_demo.py
+
+# AWS demo (real Bedrock inference, requires EC2)
+bash demo/setup_aws_demo.sh
+python3 demo/aws_demo.py
+```
+
+The admin console lets you manage tenants, edit permissions, approve requests, view audit logs, and send live messages as different tenants — all in the browser. **[→ Demo Guide](demo/README.md)**
+
 ---
 
 ## How It Works Today

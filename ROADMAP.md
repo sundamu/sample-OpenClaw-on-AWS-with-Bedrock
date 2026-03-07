@@ -28,6 +28,7 @@ Target: **v1.0 by June 2026** — a production-ready multi-tenant OpenClaw platf
 - CloudFormation: EC2 + ECR + SSM + CloudWatch (one stack)
 - Gateway Tenant Router: tenant_id derivation, AgentCore Runtime invocation
 - Auth Agent input validation: 7 prompt injection patterns on approval messages
+- Admin Console: visual management UI (dashboard, tenant permissions, approvals, audit log, live demo)
 
 ---
 
