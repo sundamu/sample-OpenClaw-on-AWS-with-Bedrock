@@ -8,19 +8,23 @@ from urllib.parse import urlparse
 ALL_TOOLS=["web_search","shell","browser","file","file_write","code_execution"]
 ALWAYS_BLOCKED=["install_skill","load_extension","eval"]
 TENANTS={
-  "wa__intern_sarah":{"name":"Sarah Chen","role":"Intern","dept":"Engineering","ch":"WhatsApp","profile":"basic","tools":["web_search"],"status":"active","last":"2026-03-05T10:30:00Z","reqs":12,"tokens_today":1840},
-  "tg__engineer_alex":{"name":"Alex Wang","role":"Senior Engineer","dept":"Engineering","ch":"Telegram","profile":"advanced","tools":["web_search","shell","browser","file","file_write","code_execution"],"status":"active","last":"2026-03-05T11:15:00Z","reqs":45,"tokens_today":28500},
-  "dc__admin_jordan":{"name":"Jordan Lee","role":"IT Admin","dept":"IT","ch":"Discord","profile":"advanced","tools":["web_search","shell","browser","file","file_write","code_execution"],"status":"active","last":"2026-03-05T11:40:00Z","reqs":28,"tokens_today":15200},
-  "sl__finance_carol":{"name":"Carol Zhang","role":"Finance Analyst","dept":"Finance","ch":"Slack","profile":"finance","tools":["web_search","file"],"status":"active","last":"2026-03-05T09:20:00Z","reqs":8,"tokens_today":4100},
-  "wa__sales_mike":{"name":"Mike Johnson","role":"Sales Manager","dept":"Sales","ch":"WhatsApp","profile":"basic","tools":["web_search"],"status":"inactive","last":"2026-03-04T16:00:00Z","reqs":0,"tokens_today":0},
+  "wa__intern_sarah":{"name":"Sarah Chen","role":"Intern","dept":"Engineering","ch":"WhatsApp","profile":"basic","tools":["web_search"],"status":"active","last":"2026-03-05T10:30:00Z","reqs":12,"tokens_today":1840,"skills_available":3,"input_tokens":3200,"output_tokens":1800},
+  "tg__engineer_alex":{"name":"Alex Wang","role":"Senior Engineer","dept":"Engineering","ch":"Telegram","profile":"advanced","tools":["web_search","shell","browser","file","file_write","code_execution"],"status":"active","last":"2026-03-05T11:15:00Z","reqs":45,"tokens_today":28500,"skills_available":7,"input_tokens":45000,"output_tokens":12000},
+  "dc__admin_jordan":{"name":"Jordan Lee","role":"IT Admin","dept":"IT","ch":"Discord","profile":"advanced","tools":["web_search","shell","browser","file","file_write","code_execution"],"status":"active","last":"2026-03-05T11:40:00Z","reqs":28,"tokens_today":15200,"skills_available":7,"input_tokens":22000,"output_tokens":8500},
+  "sl__finance_carol":{"name":"Carol Zhang","role":"Finance Analyst","dept":"Finance","ch":"Slack","profile":"finance","tools":["web_search","file"],"status":"active","last":"2026-03-05T09:20:00Z","reqs":8,"tokens_today":4100,"skills_available":5,"input_tokens":8500,"output_tokens":4100},
+  "wa__sales_mike":{"name":"Mike Johnson","role":"Sales Manager","dept":"Sales","ch":"WhatsApp","profile":"basic","tools":["web_search"],"status":"inactive","last":"2026-03-04T16:00:00Z","reqs":0,"tokens_today":0,"skills_available":3,"input_tokens":0,"output_tokens":0},
 }
 AUDIT,APPROVALS,MSGS=[],[],[]
 SKILLS=[
-  {"id":"s3-files","name":"S3 Files","desc":"Upload and share files via S3 pre-signed URLs","author":"AWS Samples","status":"installed","icon":"📤","tools_required":["file"],"tenants_authorized":3},
-  {"id":"jira-integration","name":"Jira Integration","desc":"Create tickets, query sprints, update issues","author":"Community","status":"available","icon":"🎫","tools_required":["web_search"],"tenants_authorized":0},
-  {"id":"sap-connector","name":"SAP Connector","desc":"Query financial data from SAP ERP","author":"Enterprise","status":"available","icon":"💼","tools_required":["web_search","file"],"tenants_authorized":0},
-  {"id":"slack-bridge","name":"Slack Bridge","desc":"Cross-channel messaging and notifications","author":"Community","status":"installed","icon":"💬","tools_required":["web_search"],"tenants_authorized":5},
-  {"id":"code-review","name":"Code Review","desc":"Automated PR review with security scanning","author":"Community","status":"available","icon":"🔍","tools_required":["shell","code_execution"],"tenants_authorized":0},
+  {"id":"web-search","name":"Web Search","desc":"Search the web for current information","author":"Built-in","status":"installed","icon":"🔍","tools_required":[],"tenants_authorized":5,"layer":1,"layer_label":"Built-in (Docker)","permissions":{"allowedRoles":["*"],"blockedRoles":[]}},
+  {"id":"jina-reader","name":"Jina Reader","desc":"Extract clean text from any URL","author":"Built-in","status":"installed","icon":"📖","tools_required":[],"tenants_authorized":5,"layer":1,"layer_label":"Built-in (Docker)","permissions":{"allowedRoles":["*"],"blockedRoles":[]}},
+  {"id":"s3-files","name":"S3 Files","desc":"Upload and share files via S3 pre-signed URLs","author":"AWS Samples","status":"installed","icon":"📤","tools_required":["file"],"tenants_authorized":3,"layer":1,"layer_label":"Built-in (Docker)","permissions":{"allowedRoles":["*"],"blockedRoles":["intern"]}},
+  {"id":"jira-query","name":"Jira Query","desc":"Query Jira issues by ID or search. Requires JIRA_API_TOKEN.","author":"IT Team","status":"installed","icon":"🎫","tools_required":["web_search"],"tenants_authorized":3,"layer":2,"layer_label":"S3 Hot-Load","permissions":{"allowedRoles":["engineering","product","management"],"blockedRoles":["intern"]},"requires_env":["JIRA_API_TOKEN","JIRA_BASE_URL"]},
+  {"id":"weather-lookup","name":"Weather Lookup","desc":"Look up current weather for any city (no API key needed)","author":"Platform Team","status":"installed","icon":"🌤️","tools_required":[],"tenants_authorized":5,"layer":2,"layer_label":"S3 Hot-Load","permissions":{"allowedRoles":["*"],"blockedRoles":[]}},
+  {"id":"sap-connector","name":"SAP Connector","desc":"Query financial data from SAP ERP","author":"Enterprise","status":"installed","icon":"💼","tools_required":["web_search","file"],"tenants_authorized":1,"layer":2,"layer_label":"S3 Hot-Load","permissions":{"allowedRoles":["finance","executive"],"blockedRoles":["intern"]},"requires_env":["SAP_CLIENT_SECRET"]},
+  {"id":"slack-bridge","name":"Slack Bridge","desc":"Cross-channel messaging and notifications","author":"Community","status":"installed","icon":"💬","tools_required":["web_search"],"tenants_authorized":5,"layer":3,"layer_label":"Pre-built Bundle","permissions":{"allowedRoles":["*"],"blockedRoles":[]}},
+  {"id":"github-pr-review","name":"GitHub PR Review","desc":"Automated PR review with security scanning","author":"Community","status":"installed","icon":"🔍","tools_required":["shell","code_execution"],"tenants_authorized":2,"layer":3,"layer_label":"Pre-built Bundle","permissions":{"allowedRoles":["engineering"],"blockedRoles":["intern"]}},
+  {"id":"code-review","name":"Code Review","desc":"AI-powered code review and suggestions","author":"Community","status":"available","icon":"🧑‍💻","tools_required":["shell","code_execution"],"tenants_authorized":0,"layer":3,"layer_label":"Pre-built Bundle","permissions":{"allowedRoles":["engineering"],"blockedRoles":[]}},
 ]
 TASKS=[
   {"id":"t1","name":"Weekly Engineering Summary","schedule":"Mon 8:00 AM","tenant":"tg__engineer_alex","status":"active","last_run":"2026-03-03T08:00:00Z","next_run":"2026-03-10T08:00:00Z"},
@@ -103,8 +107,16 @@ def handle(path,method,body=None):
         days=[];now=datetime.now(timezone.utc)
         for i in range(14):
             d=now-timedelta(days=13-i)
-            days.append({"date":d.strftime("%m/%d"),"tokens":random.randint(30000,80000),"cost":round(random.uniform(0.08,0.20),2),"reqs":random.randint(50,200)})
-        return 200,{"days":days,"by_tenant":[{"id":k,"name":v["name"],"tokens":v["tokens_today"],"cost":round(v["tokens_today"]/1000000*2.5,2)}for k,v in TENANTS.items()]}
+            inp_t=random.randint(20000,60000);out_t=random.randint(8000,25000)
+            cost=round(inp_t/1000000*0.30+out_t/1000000*2.50,4)
+            days.append({"date":d.strftime("%m/%d"),"tokens":inp_t+out_t,"input_tokens":inp_t,"output_tokens":out_t,"cost":cost,"reqs":random.randint(50,200)})
+        by_tenant=[]
+        for k,v in TENANTS.items():
+            inp=v.get("input_tokens",0);out=v.get("output_tokens",0)
+            cost=round(inp/1000000*0.30+out/1000000*2.50,4)
+            by_tenant.append({"id":k,"name":v["name"],"tokens":v["tokens_today"],"input_tokens":inp,"output_tokens":out,"cost":cost,"skills_available":v.get("skills_available",0)})
+        total_inp=sum(v.get("input_tokens",0)for v in TENANTS.values());total_out=sum(v.get("output_tokens",0)for v in TENANTS.values())
+        return 200,{"days":days,"by_tenant":by_tenant,"rates":{"model":"Nova 2 Lite","input_per_1m":0.30,"output_per_1m":2.50},"totals":{"input_tokens":total_inp,"output_tokens":total_out,"cost_today":round(total_inp/1000000*0.30+total_out/1000000*2.50,4),"chatgpt_equivalent":len([t for t in TENANTS.values()if t["status"]=="active"])*20.00}}
     if path=="/api/demo/send"and method=="POST":
         if not body:return 400,{}
         d=json.loads(body);tid=d.get("tenant_id","");msg=d.get("message","")

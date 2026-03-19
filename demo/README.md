@@ -4,7 +4,7 @@ Three demos, from simple to visual:
 
 | Demo | What it is | Requirements |
 |------|-----------|-------------|
-| `run_demo.py` | Terminal-based, 7 scenarios | Python 3.10+, boto3 |
+| `run_demo.py` | Terminal-based, 11 scenarios | Python 3.10+, boto3 |
 | `aws_demo.py` | Real Bedrock inference on EC2 | EC2 instance + Bedrock |
 | `console.py` | Visual admin console in browser | Python 3.10+ |
 
@@ -51,6 +51,22 @@ python3 demo/run_demo.py
 ```
 
 Requirements: Python 3.10+ with `boto3` (`pip install boto3`). No AWS credentials needed.
+
+### Scenarios
+
+| # | Scenario | What it demonstrates |
+|---|----------|---------------------|
+| 1 | Intern web search | Basic profile, web_search allowed |
+| 2 | Intern shell blocked | Plan A + Plan E enforcement |
+| 3 | Engineer shell allowed | Advanced profile, full tools |
+| 4 | Admin install_skill | ALWAYS_BLOCKED supply chain protection |
+| 5 | Auth Agent approval | Permission request, risk assessment, token issuance |
+| 6 | Prompt injection | Approval flow injection detection |
+| 7 | Field validation | Path traversal, SQL injection, invalid types |
+| 8 | Skill loading (Layer 2) | Role-based filtering, engineer vs intern |
+| 9 | Token metering | Per-tenant cost tracking, ChatGPT Plus comparison |
+| 10 | Cold start fast-path | H2 Proxy state machine (cold/warming/warm) |
+| 11 | Skill + permission E2E | Load → filter → inject API key → execute |
 
 ---
 
