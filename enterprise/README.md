@@ -193,6 +193,7 @@ cd enterprise
 bash deploy-multitenancy.sh <STACK_NAME> <REGION>
 # Example: bash deploy-multitenancy.sh openclaw-multitenancy us-east-1
 # Creates: EC2 Gateway, ECR, S3, IAM roles, AgentCore Runtime (~10 min)
+cd ..   # back to repo root
 ```
 
 Get outputs:
@@ -224,7 +225,7 @@ aws dynamodb create-table \
 This creates a sample company (ACME Corp) with 20 employees, 20 agents, 10 positions across 7 departments.
 
 ```bash
-cd enterprise/admin-console/server
+cd enterprise/admin-console/server   # from repo root
 pip install boto3 requests
 export S3_BUCKET="$S3_BUCKET"
 
@@ -237,7 +238,7 @@ python3 seed_roles.py --region us-east-2             # RBAC roles
 python3 seed_settings.py --region us-east-2          # model + security config
 
 # SSM seeds (same region as AgentCore)
-python3 seed_ssm_tenants.py --region us-east-1       # tenant→position mappings
+python3 seed_ssm_tenants.py --region us-east-1 --stack $STACK_NAME  # tenant→position mappings
 
 # S3 seeds
 python3 seed_skills_final.py                         # 26 skills (auto-detects bucket)
@@ -249,8 +250,11 @@ python3 seed_knowledge_docs.py --bucket "$S3_BUCKET" # 12 knowledge documents
 ### Step 4: Deploy Admin Console
 
 ```bash
-# Build
-cd enterprise/admin-console && npm install && npm run build
+# Build frontend
+cd enterprise/admin-console
+npm install
+npm run build
+cd ../..   # back to repo root
 
 # Package and upload
 COPYFILE_DISABLE=1 tar czf /tmp/admin-deploy.tar.gz -C enterprise/admin-console dist server
@@ -260,10 +264,11 @@ aws s3 cp /tmp/admin-deploy.tar.gz "s3://${S3_BUCKET}/_deploy/admin-deploy.tar.g
 aws ssm send-command --instance-ids $INSTANCE_ID --region $REGION \
   --document-name AWS-RunShellScript \
   --parameters '{"commands":[
-    "pip3 install fastapi uvicorn boto3 requests",
+    "python3 -m venv /opt/admin-venv",
+    "/opt/admin-venv/bin/pip install fastapi uvicorn boto3 requests",
     "aws s3 cp s3://'"$S3_BUCKET"'/_deploy/admin-deploy.tar.gz /tmp/admin-deploy.tar.gz",
     "mkdir -p /opt/admin-console && tar xzf /tmp/admin-deploy.tar.gz -C /opt/admin-console",
-    "chown -R ubuntu:ubuntu /opt/admin-console"
+    "chown -R ubuntu:ubuntu /opt/admin-console /opt/admin-venv"
   ]}'
 ```
 
