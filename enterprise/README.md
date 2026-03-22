@@ -371,6 +371,7 @@ enterprise/
 ├── clawdbot-bedrock-agentcore-multitenancy.yaml  # CloudFormation template
 ├── docs/                                  # Design documents
 │   ├── prd.md                             # Product requirements
+│   ├── architecture.md                    # Technical architecture deep-dive
 │   ├── rbac-portal-design.md              # RBAC + Portal design
 │   ├── skill-platform-design.md           # Skill architecture
 │   └── cold-start-optimization-design.md  # Performance optimization
@@ -384,7 +385,9 @@ enterprise/
 │   ├── workspace_assembler.py             # 3-layer SOUL merge
 │   └── skill_loader.py                    # Role-filtered skill loading
 ├── auth-agent/                            # Authorization Agent (approval flow)
-└── demo/                                  # Legacy demo UI
+└── demo/                                  # Interactive demo (no server needed)
+    ├── README.md                          # Demo guide with scenarios
+    └── index.html                         # Self-contained static demo app
 ```
 
 ## Cost Estimate
