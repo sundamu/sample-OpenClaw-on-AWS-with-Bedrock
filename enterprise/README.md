@@ -394,9 +394,9 @@ The seed scripts create ACME Corp — a B2B SaaS company with:
 | | Count | Details |
 |-|-------|---------|
 | Departments | 13 | 7 top-level + 6 sub-departments |
-| Positions | 10 | SA, SDE, DevOps, QA, AE, PM, FA, HR, CSM, Legal |
-| Employees | 20 | Each with workspace files in S3 |
-| Agents | 20 | 18 personal (1:1) + 2 shared (Help Desk, Onboarding) |
+| Positions | 11 | SA, SDE, DevOps, QA, AE, PM, FA, HR, CSM, Legal, Executive |
+| Employees | 22 | Each with workspace files in S3 |
+| Agents | 22 | 20 personal (1:1) + 2 shared (Help Desk, Onboarding) |
 | Skills | 26 | 6 global + 20 department-scoped, 3 layers |
 | Knowledge Docs | 12 | Company policies, architecture standards, runbooks, etc. |
 | SOUL Templates | 10 | 1 global + 9 position-specific |
@@ -407,8 +407,10 @@ The seed scripts create ACME Corp — a B2B SaaS company with:
 | Employee ID | Name | Role | What They See |
 |-------------|------|------|--------------|
 | emp-z3 | Zhang San | Admin | Full Admin Console |
+| emp-jiade | JiaDe Wang | Admin | Full Admin Console (Discord-connected) |
 | emp-lin | Lin Xiaoyu | Manager | Product department only |
 | emp-mike | Mike Johnson | Manager | Sales department only |
+| emp-peter | Peter Wu | Manager | Engineering (Executive, Discord-connected) |
 | emp-w5 | Wang Wu | Employee | Portal: SDE Agent |
 | emp-carol | Carol Zhang | Employee | Portal: Finance Agent |
 | emp-emma | Emma Chen | Employee | Portal: CSM Agent |

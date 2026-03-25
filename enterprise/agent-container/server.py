@@ -395,6 +395,14 @@ def _invoke_openclaw_once(tenant_id: str, message: str, timeout: int = 300) -> d
         for line in stderr.splitlines():
             logger.warning("[openclaw stderr] %s", line)
 
+    # OpenClaw may write JSON response to stderr when Gateway fallback occurs
+    # ("Gateway agent failed; falling back to embedded" → JSON goes to stderr)
+    if not stdout and stderr:
+        json_start_stderr = stderr.find('{')
+        if json_start_stderr != -1:
+            logger.info("JSON found in stderr (Gateway fallback mode), using stderr as output")
+            stdout = stderr[json_start_stderr:]
+
     if not stdout:
         raise RuntimeError(f"openclaw returned empty output (exit={result.returncode})")
 

@@ -26,6 +26,8 @@ TENANTS = {
     "emp-jenny": "pos-hr",
     "emp-emma": "pos-csm",
     "emp-rachel": "pos-legal",
+    "emp-jiade": "pos-sa",
+    "emp-peter": "pos-exec",
     # Shared agents
     "agent-helpdesk": "pos-devops",
     "agent-onboarding": "pos-hr",

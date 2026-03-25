@@ -3,7 +3,7 @@ import Chart from 'react-apexcharts';
 import type { ApexOptions } from 'apexcharts';
 import { DollarSign, TrendingUp, TrendingDown, Users, Bot, AlertTriangle, Download, Calendar } from 'lucide-react';
 import { Card, StatCard, Badge, Button, PageHeader, Table, Tabs } from '../components/ui';
-import { useUsageSummary, useUsageByDepartment, useUsageByAgent, useUsageBudgets, useUsageTrend } from '../hooks/useApi';
+import { useUsageSummary, useUsageByDepartment, useUsageByAgent, useUsageBudgets, useUsageTrend, useUsageByModel } from '../hooks/useApi';
 
 const costTrendOpts: ApexOptions = {
   chart: { type: 'area', toolbar: { show: false }, background: 'transparent' },
@@ -22,6 +22,7 @@ export default function Usage() {
   const { data: summary } = useUsageSummary();
   const { data: byDept = [] } = useUsageByDepartment();
   const { data: byAgent = [] } = useUsageByAgent();
+  const { data: byModel = [] } = useUsageByModel();
   const { data: budgets = [] } = useUsageBudgets();
   const { data: trend = [] } = useUsageTrend();
   const [activeTab, setActiveTab] = useState('department');
@@ -170,48 +171,61 @@ export default function Usage() {
                 <Chart
                   options={{
                     chart: { type: 'donut', background: 'transparent' },
-                    colors: ['#22c55e', '#6366f1', '#f59e0b'],
-                    labels: ['Nova 2 Lite', 'Claude Sonnet 4.5', 'Nova Pro'],
+                    colors: ['#22c55e', '#6366f1', '#f59e0b', '#06b6d4', '#ef4444'],
+                    labels: byModel.map(m => m.model.split('/').pop()?.split(':')[0] || m.model),
                     legend: { position: 'bottom', labels: { colors: '#94a3b8' } },
-                    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'Total Tokens', color: '#94a3b8', formatter: () => `${((s.totalInputTokens + s.totalOutputTokens) / 1000).toFixed(0)}k` } } } } },
+                    plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: 'Total Tokens', color: '#94a3b8', formatter: () => `${(byModel.reduce((s, m) => s + m.inputTokens + m.outputTokens, 0) / 1000).toFixed(0)}k` } } } } },
                     dataLabels: { enabled: false },
                     tooltip: { theme: 'dark' },
                   }}
-                  series={[
-                    Math.round((s.totalInputTokens + s.totalOutputTokens) * 0.72),
-                    Math.round((s.totalInputTokens + s.totalOutputTokens) * 0.18),
-                    Math.round((s.totalInputTokens + s.totalOutputTokens) * 0.10),
-                  ]}
+                  series={byModel.map(m => m.inputTokens + m.outputTokens)}
                   type="donut" height={300}
                 />
               </div>
               <div>
                 <h3 className="text-sm font-semibold text-text-primary mb-4">Cost by Model</h3>
                 <div className="space-y-4">
-                  {[
-                    { model: 'Nova 2 Lite', id: 'global.amazon.nova-2-lite-v1:0', requests: Math.round(s.totalRequests * 0.72), cost: s.totalCost * 0.45, inputRate: 0.30, outputRate: 2.50, color: '#22c55e', positions: 'Default (all positions)' },
-                    { model: 'Claude Sonnet 4.5', id: 'global.anthropic.claude-sonnet-4-5', requests: Math.round(s.totalRequests * 0.18), cost: s.totalCost * 0.42, inputRate: 3.00, outputRate: 15.00, color: '#6366f1', positions: 'SA, SDE (override)' },
-                    { model: 'Nova Pro', id: 'us.amazon.nova-pro-v1:0', requests: Math.round(s.totalRequests * 0.10), cost: s.totalCost * 0.13, inputRate: 0.80, outputRate: 3.20, color: '#f59e0b', positions: 'Finance, Legal (override)' },
-                  ].map(m => (
-                    <div key={m.model} className="rounded-lg bg-dark-bg p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: m.color }} />
-                          <span className="text-sm font-medium">{m.model}</span>
+                  {(() => {
+                    const colors = ['#22c55e', '#6366f1', '#f59e0b', '#06b6d4', '#ef4444'];
+                    const modelRates: Record<string, { input: number; output: number }> = {
+                      'nova-2-lite': { input: 0.30, output: 2.50 },
+                      'nova-pro': { input: 0.80, output: 3.20 },
+                      'claude-sonnet': { input: 3.00, output: 15.00 },
+                      'claude-haiku': { input: 0.25, output: 1.25 },
+                    };
+                    const totalModelCost = byModel.reduce((s, m) => s + m.cost, 0);
+                    return byModel.map((m, i) => {
+                      const shortName = m.model.split('/').pop()?.split(':')[0] || m.model;
+                      const rateKey = Object.keys(modelRates).find(k => shortName.toLowerCase().includes(k)) || '';
+                      const rates = modelRates[rateKey] || { input: 0.30, output: 2.50 };
+                      const pct = totalModelCost > 0 ? Math.round(m.cost / totalModelCost * 100) : 0;
+                      return (
+                        <div key={m.model} className="rounded-lg bg-dark-bg p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: colors[i % colors.length] }} />
+                              <span className="text-sm font-medium">{shortName}</span>
+                            </div>
+                            <span className="text-sm font-semibold" style={{ color: colors[i % colors.length] }}>${m.cost.toFixed(4)}</span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-3 text-xs text-text-muted">
+                            <div><span className="block text-text-secondary">{m.requests}</span>requests</div>
+                            <div><span className="block text-text-secondary">${rates.input}/${rates.output}</span>per 1M tokens</div>
+                            <div><span className="block text-text-secondary">{pct}%</span>of total cost</div>
+                          </div>
                         </div>
-                        <span className="text-sm font-semibold" style={{ color: m.color }}>${m.cost.toFixed(2)}</span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-3 text-xs text-text-muted">
-                        <div><span className="block text-text-secondary">{m.requests}</span>requests</div>
-                        <div><span className="block text-text-secondary">${m.inputRate}/${m.outputRate}</span>per 1M tokens</div>
-                        <div><span className="block text-text-secondary">{m.positions}</span>assigned to</div>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    });
+                  })()}
                 </div>
-                <div className="mt-4 rounded-lg bg-success/5 border border-success/20 p-3 text-xs text-success">
-                  💡 Nova 2 Lite handles 72% of requests at 45% of cost. Claude Sonnet 4.5 handles 18% of requests but accounts for 42% of cost due to higher per-token pricing.
-                </div>
+                {byModel.length === 0 && (
+                  <p className="text-sm text-text-muted text-center py-8">No model usage data available</p>
+                )}
+                {byModel.length > 0 && (
+                  <div className="mt-4 rounded-lg bg-success/5 border border-success/20 p-3 text-xs text-success">
+                    💡 Data from DynamoDB usage records. Real token counts from AgentCore invocations.
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -47,6 +47,7 @@ def seed(table_name: str, region: str):
         ("pos-hr", "HR Specialist", "dept-hr", "HR & Admin", ["jina-reader","web-search"], ["web_search","file"], 3),
         ("pos-csm", "Customer Success Manager", "dept-cs", "Customer Success", ["jina-reader","web-search","crm-query","slack-bridge"], ["web_search","file","browser"], 4),
         ("pos-legal", "Legal Counsel", "dept-legal", "Legal & Compliance", ["jina-reader","deep-research"], ["web_search","file"], 2),
+        ("pos-exec", "Executive", "dept-eng", "Engineering", ["jina-reader","deep-research","web_search"], ["web_search","shell","browser","file","file_write","code_execution"], 1),
     ]
     for pid, name, did, dname, skills, tools, mc in positions:
         items.append({"PK": ORG, "SK": f"POS#{pid}", "GSI1PK": "TYPE#pos", "GSI1SK": f"POS#{pid}",
@@ -75,6 +76,8 @@ def seed(table_name: str, region: str):
         ("emp-jenny", "Jenny Liu", "EMP-018", "pos-hr", "HR Specialist", "dept-hr", "HR & Admin", ["feishu","dingtalk"], "agent-hr-jenny", "active"),
         ("emp-emma", "Emma Chen", "EMP-019", "pos-csm", "Customer Success Manager", "dept-cs", "Customer Success", ["slack","whatsapp"], "agent-csm-emma", "active"),
         ("emp-rachel", "Rachel Li", "EMP-021", "pos-legal", "Legal Counsel", "dept-legal", "Legal & Compliance", ["slack"], "agent-legal-rachel", "active"),
+        ("emp-jiade", "JiaDe Wang", "EMP-030", "pos-sa", "Solutions Architect", "dept-eng", "Engineering", ["discord","slack"], "agent-sa-jiade", "active"),
+        ("emp-peter", "Peter Wu", "EMP-031", "pos-exec", "Executive", "dept-eng", "Engineering", ["discord"], "agent-exec-peter", "active"),
     ]
     for eid, name, eno, pid, pname, did, dname, chs, aid, ast in employees:
         item = {"PK": ORG, "SK": f"EMP#{eid}", "GSI1PK": "TYPE#emp", "GSI1SK": f"EMP#{eid}",
@@ -104,6 +107,8 @@ def seed(table_name: str, region: str):
         ("agent-hr-jenny", "HR Agent - Jenny", "emp-jenny", "Jenny Liu", "pos-hr", "HR Specialist", "active", 4.1, ["jina-reader","web-search"], ["feishu","dingtalk"]),
         ("agent-csm-emma", "CSM Agent - Emma", "emp-emma", "Emma Chen", "pos-csm", "Customer Success Manager", "active", 4.6, ["jina-reader","web-search","crm-query","slack-bridge"], ["slack","whatsapp"]),
         ("agent-legal-rachel", "Legal Agent - Rachel", "emp-rachel", "Rachel Li", "pos-legal", "Legal Counsel", "active", 4.8, ["jina-reader","deep-research"], ["slack"]),
+        ("agent-sa-jiade", "SA Agent - JiaDe", "emp-jiade", "JiaDe Wang", "pos-sa", "Solutions Architect", "active", None, ["jina-reader","deep-research","arch-diagram-gen","cost-calculator"], ["discord","slack"]),
+        ("agent-exec-peter", "Executive Agent - Peter", "emp-peter", "Peter Wu", "pos-exec", "Executive", "active", None, ["jina-reader","deep-research","web_search"], ["discord"]),
         ("agent-helpdesk", "IT Help Desk Agent", None, "(Shared)", "pos-devops", "DevOps Engineer", "active", 4.0, ["jina-reader","web-search","jira-query"], ["discord","slack"]),
         ("agent-onboarding", "Onboarding Assistant", None, "(Shared)", "pos-hr", "HR Specialist", "active", 4.3, ["jina-reader","web-search"], ["feishu","slack"]),
     ]

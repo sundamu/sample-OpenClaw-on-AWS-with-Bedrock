@@ -35,6 +35,14 @@ EMPLOYEES = {
         "focus": "GDPR compliance review, vendor contract templates", "style": "Cite specific regulations. Always add legal disclaimer.",
         "memory": "Updated DPA template for GDPR Article 28. Vendor contract review backlog: 3 pending. SOC 2 audit scheduled May.",
         "daily": "Reviewed 2 vendor contracts. Flagged missing data processing addendum in CloudVendor agreement."},
+    "emp-jiade": {"name": "JiaDe Wang", "role": "Solutions Architect", "dept": "Engineering", "tz": "Asia/Shanghai", "lang": "Chinese preferred, English OK",
+        "focus": "OpenClaw Enterprise on AgentCore — multi-tenant digital workforce platform", "style": "Technical, concise. Architecture diagrams and cost comparisons.",
+        "memory": "Leading OpenClaw Enterprise project. Gateway architecture with H2 Proxy + Tenant Router. 22 employees, 22 agents deployed. Discord Bot connected.",
+        "daily": "Deployed v21 Docker image with stderr JSON fix. Added JiaDe and Peter to DynamoDB. Verified SOUL injection working for both accounts."},
+    "emp-peter": {"name": "Peter Wu", "role": "Executive", "dept": "Engineering", "tz": "Asia/Hong_Kong", "lang": "Chinese preferred, English OK",
+        "focus": "Strategic planning, team management, technology evaluation", "style": "High-level, strategic. Focus on business impact and ROI.",
+        "memory": "Evaluating OpenClaw Enterprise for team adoption. Interested in cost savings vs ChatGPT Team. Concerned about cold start latency.",
+        "daily": "Tested Discord Bot integration. Verified role-based access control — no finance/HR data access as Executive role."},
 }
 
 def seed():

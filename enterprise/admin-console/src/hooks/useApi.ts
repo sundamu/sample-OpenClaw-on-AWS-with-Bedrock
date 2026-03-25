@@ -260,6 +260,13 @@ export function useAgentDailyUsage(agentId: string) {
   });
 }
 
+export function useUsageByModel() {
+  return useQuery<{ model: string; inputTokens: number; outputTokens: number; requests: number; cost: number }[]>({
+    queryKey: ['usage-by-model'],
+    queryFn: () => api.get('/usage/by-model'),
+  });
+}
+
 export function useUsageBudgets() {
   return useQuery<{ department: string; budget: number; used: number; projected: number; status: string }[]>({
     queryKey: ['usage-budgets'],

@@ -1891,22 +1891,42 @@ def dashboard(authorization: str = Header(default="")):
 # Per-agent usage data — reads from DynamoDB (seeded by seed_usage.py)
 
 def _get_agent_usage_today() -> dict:
-    """Aggregate today's usage per agent from DynamoDB USAGE# records."""
+    """Aggregate today's usage per agent from DynamoDB USAGE# records.
+    Reads today's date dynamically. Falls back to seed date if no data found."""
     from datetime import date as _date
-    today = "2026-03-20"  # In production: _date.today().isoformat()
+    today = _date.today().isoformat()
     all_usage = db.get_usage_by_date(today)
+    # Fallback: if no data for today, try seed date (demo mode)
+    if not all_usage:
+        all_usage = db.get_usage_by_date("2026-03-20")
+    # Also merge any other recent dates to capture real Discord usage
+    for offset in range(1, 7):
+        from datetime import timedelta
+        past = (_date.today() - timedelta(days=offset)).isoformat()
+        past_usage = db.get_usage_by_date(past)
+        for u in past_usage:
+            aid = u.get("agentId", "")
+            if aid and aid not in {uu.get("agentId") for uu in all_usage}:
+                all_usage.append(u)
     result = {}
     for u in all_usage:
         aid = u.get("agentId", "")
         if not aid:
             continue
-        result[aid] = {
-            "inputTokens": u.get("inputTokens", 0),
-            "outputTokens": u.get("outputTokens", 0),
-            "requests": u.get("requests", 0),
-            "cost": float(u.get("cost", 0)),
-            "model": u.get("model", ""),
-        }
+        if aid in result:
+            # Accumulate across dates
+            result[aid]["inputTokens"] += u.get("inputTokens", 0)
+            result[aid]["outputTokens"] += u.get("outputTokens", 0)
+            result[aid]["requests"] += u.get("requests", 0)
+            result[aid]["cost"] += float(u.get("cost", 0))
+        else:
+            result[aid] = {
+                "inputTokens": u.get("inputTokens", 0),
+                "outputTokens": u.get("outputTokens", 0),
+                "requests": u.get("requests", 0),
+                "cost": float(u.get("cost", 0)),
+                "model": u.get("model", ""),
+            }
     return result
 
 @app.get("/api/v1/usage/summary")
@@ -1917,13 +1937,15 @@ def usage_summary():
     total_cost = sum(u["cost"] for u in usage_map.values())
     total_requests = sum(u["requests"] for u in usage_map.values())
     employees = db.get_employees()
+    # ChatGPT Team costs $25/user/month = ~$0.83/user/day
+    chatgpt_daily = len([e for e in employees if e.get("agentId")]) * 0.83
     return {
         "totalInputTokens": total_input,
         "totalOutputTokens": total_output,
         "totalCost": round(total_cost, 2),
         "totalRequests": total_requests,
         "tenantCount": len([e for e in employees if e.get("agentId")]),
-        "chatgptEquivalent": 5.00,
+        "chatgptEquivalent": round(chatgpt_daily, 2),
     }
 
 @app.get("/api/v1/usage/by-department")
@@ -1967,6 +1989,41 @@ def usage_by_agent():
             **usage,
         })
     return sorted(result, key=lambda x: x["cost"], reverse=True)
+
+@app.get("/api/v1/usage/by-model")
+def usage_by_model():
+    """Aggregate usage by model from DynamoDB USAGE# records."""
+    from datetime import date as _date, timedelta
+    model_usage: dict = {}
+    # Scan last 7 days of usage records
+    for offset in range(7):
+        d = (_date.today() - timedelta(days=offset)).isoformat()
+        records = db.get_usage_by_date(d)
+        for u in records:
+            model = u.get("model", "unknown")
+            if model == "unknown" or not model:
+                model = "global.amazon.nova-2-lite-v1:0"  # default
+            if model not in model_usage:
+                model_usage[model] = {"model": model, "inputTokens": 0, "outputTokens": 0, "requests": 0, "cost": 0}
+            model_usage[model]["inputTokens"] += u.get("inputTokens", 0)
+            model_usage[model]["outputTokens"] += u.get("outputTokens", 0)
+            model_usage[model]["requests"] += u.get("requests", 0)
+            model_usage[model]["cost"] += float(u.get("cost", 0))
+    # Fallback to seed date if empty
+    if not model_usage:
+        records = db.get_usage_by_date("2026-03-20")
+        for u in records:
+            model = u.get("model", "global.amazon.nova-2-lite-v1:0")
+            if model not in model_usage:
+                model_usage[model] = {"model": model, "inputTokens": 0, "outputTokens": 0, "requests": 0, "cost": 0}
+            model_usage[model]["inputTokens"] += u.get("inputTokens", 0)
+            model_usage[model]["outputTokens"] += u.get("outputTokens", 0)
+            model_usage[model]["requests"] += u.get("requests", 0)
+            model_usage[model]["cost"] += float(u.get("cost", 0))
+    result = sorted(model_usage.values(), key=lambda x: x["cost"], reverse=True)
+    for r in result:
+        r["cost"] = round(r["cost"], 4)
+    return result
 
 @app.get("/api/v1/usage/agent/{agent_id}")
 def usage_for_agent(agent_id: str):
