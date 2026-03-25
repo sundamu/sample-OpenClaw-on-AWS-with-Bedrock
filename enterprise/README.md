@@ -6,9 +6,9 @@ Turn [OpenClaw](https://github.com/openclaw/openclaw) from a personal AI assista
 
 > **https://openclaw.awspsa.com**
 >
-> A real running instance with 7 departments, 13 sub-departments, 10 positions, 20 employees, 20 AI agents (18 personal + 2 shared), 26 role-filtered skills, and 12 knowledge documents — all backed by DynamoDB + S3 on AWS.
+> A real running instance with 7 departments, 13 sub-departments, 11 positions, 22 employees, 22 AI agents (20 personal + 2 shared), 26 role-filtered skills, and 12 knowledge documents — all backed by DynamoDB + S3 on AWS.
 >
-> This is not a mockup. Every button works, every chart reads from real data, every agent runs on Bedrock AgentCore in isolated Firecracker microVMs.
+> This is not a mockup. Every button works, every chart reads from real data, every agent runs on Bedrock AgentCore in isolated Firecracker microVMs. Discord Bot connected with real SOUL injection verified.
 >
 > Need a demo account? Contact [wjiad@aws](mailto:wjiad@amazon.com) to get access.
 
@@ -399,20 +399,20 @@ The seed scripts create ACME Corp — a B2B SaaS company with:
 | Agents | 22 | 20 personal (1:1) + 2 shared (Help Desk, Onboarding) |
 | Skills | 26 | 6 global + 20 department-scoped, 3 layers |
 | Knowledge Docs | 12 | Company policies, architecture standards, runbooks, etc. |
-| SOUL Templates | 10 | 1 global + 9 position-specific |
-| RBAC Roles | 3 | Admin (2), Manager (3), Employee (15) |
+| SOUL Templates | 11 | 1 global + 10 position-specific |
+| RBAC Roles | 3 | Admin (2), Manager (3), Employee (17) |
 
 ### Demo Accounts
 
 | Employee ID | Name | Role | What They See |
 |-------------|------|------|--------------|
 | emp-z3 | Zhang San | Admin | Full Admin Console |
-| emp-jiade | JiaDe Wang | Admin | Full Admin Console (Discord-connected) |
+| emp-jiade | JiaDe Wang | Admin | Full Admin Console (Discord-connected, SA full tools) |
 | emp-lin | Lin Xiaoyu | Manager | Product department only |
 | emp-mike | Mike Johnson | Manager | Sales department only |
-| emp-peter | Peter Wu | Manager | Engineering (Executive, Discord-connected) |
-| emp-w5 | Wang Wu | Employee | Portal: SDE Agent |
-| emp-carol | Carol Zhang | Employee | Portal: Finance Agent |
+| emp-peter | Peter Wu | Manager | Engineering (Executive, Discord-connected, no shell/code) |
+| emp-w5 | Wang Wu | Employee | Portal: SDE Agent (full dev tools) |
+| emp-carol | Carol Zhang | Employee | Portal: Finance Agent (Excel + SAP only, no shell) |
 | emp-emma | Emma Chen | Employee | Portal: CSM Agent |
 
 ## What to Test
@@ -425,16 +425,45 @@ Same LLM, completely different identities.
 ### 2. Permission Boundaries
 Carol: "Run git status" → **Refused** (Finance role has no shell)
 Wang Wu: "Run git status" → **Executed** (SDE role has shell access)
+JiaDe (Discord): Full shell/code access (SA role)
+Peter (Discord): "Run ls" → **Refused** (Executive role, no shell/code)
 
 ### 3. Manager Data Scoping
 Login as Lin Xiaoyu (Manager) → Dashboard → **Only Product department data visible**
 
 ### 4. Real-time Usage
 Send messages in Portal → Usage & Cost page updates with **real token counts from DynamoDB**
+By Model tab shows **real model distribution** from DynamoDB usage records
 
 ### 5. Memory Persistence
 Carol tells agent "Remember: I prefer EBITDA analysis" → Agent writes to memory →
 Memory file syncs to S3 → Next session, agent remembers the preference
+
+### 6. LLM Model Management (Settings)
+Settings → LLM Provider → **Change default model** (writes to DynamoDB)
+**Add position override** (e.g., SA uses Claude Sonnet, Finance uses Nova Pro)
+Changes take effect on next agent cold start — no redeployment needed
+
+### 7. IT Admin Assistant
+Click the **floating chat bubble** (bottom-right) → Chat with the IT Admin Agent
+This agent runs on the Gateway EC2 with full system access (shell, file, browser)
+Try: "Check Gateway service status" or "Show recent CloudWatch logs"
+
+### 8. Workspace Explorer
+Workspace Manager → Select an agent → **M3 collapsible tree** with folders
+Click any .md file → **Rendered markdown** (tables, code blocks, lists)
+Toggle Raw/Rendered view for source inspection
+
+## Design System
+
+The Admin Console uses a custom design system inspired by **Material Design 3 Expressive** and **Gemini AI Visual Design**:
+
+- **M3 Tonal Surface System** — 6 surface levels (surface-dim → surface-container-highest) for depth without borders
+- **Spring Physics Motion** — Overshoot bounce for modals/cards, scale press for buttons, spring toggle for switches
+- **Gemini Gradients** — Pulsing gradient animations for loading states, shimmer effects for skeletons
+- **Dark/Light Theme** — Toggle in sidebar bottom, persisted to localStorage, smooth 400ms transition
+- **Rounded Shapes** — 20px cards, 28px modals, 16px buttons (M3 large radius)
+- **Accessible Status Indicators** — Ping animation for active, pulse for pending, color-coded dots
 
 ## Project Structure
 
@@ -452,20 +481,35 @@ enterprise/
 │   └── cold-start-optimization-design.md  # Performance optimization
 ├── admin-console/                         # React frontend + FastAPI backend
 │   ├── src/                               # 24 pages (19 admin + 5 portal)
-│   └── server/                            # 35+ API endpoints + seed scripts
+│   │   ├── components/                    # UI components (M3 design system)
+│   │   │   ├── ui.tsx                     # Card, Button, Badge, Modal, Table, Tabs, etc.
+│   │   │   ├── Layout.tsx                 # Admin sidebar + top bar + search
+│   │   │   ├── PortalLayout.tsx           # Employee portal sidebar
+│   │   │   ├── AdminAssistant.tsx         # Floating IT Admin chat bubble
+│   │   │   └── ClawForgeLogo.tsx          # Animated logo component
+│   │   ├── contexts/                      # React contexts
+│   │   │   ├── AuthContext.tsx             # JWT auth + role-based routing
+│   │   │   └── ThemeContext.tsx            # Dark/light theme toggle
+│   │   └── pages/                         # All page components
+│   └── server/                            # FastAPI backend + seed scripts
+│       ├── main.py                        # 40+ API endpoints
+│       ├── db.py                          # DynamoDB single-table operations
+│       ├── s3ops.py                       # S3 file operations
+│       ├── auth.py                        # JWT authentication
+│       └── seed_*.py                      # 10 seed scripts for sample data
 ├── agent-container/                       # Docker image for AgentCore
 │   ├── Dockerfile                         # Multi-stage ARM64 build
 │   ├── entrypoint.sh                      # S3 sync + workspace assembly
-│   ├── server.py                          # HTTP server wrapping OpenClaw CLI
+│   ├── server.py                          # HTTP server + dynamic model config
 │   ├── workspace_assembler.py             # 3-layer SOUL merge
 │   └── skill_loader.py                    # Role-filtered skill loading
 ├── gateway/                               # EC2 Gateway components
-│   ├── bedrock_proxy_h2.js                # H2 Proxy — intercepts Bedrock SDK, extracts tenant identity
-│   └── tenant_router.py                   # Tenant Router — derives tenant_id, invokes AgentCore
+│   ├── bedrock_proxy_h2.js                # H2 Proxy — intercepts Bedrock SDK
+│   └── tenant_router.py                   # Tenant Router — routes to AgentCore
 ├── auth-agent/                            # Authorization Agent (approval flow)
-└── demo/                                  # Interactive demo (no server needed)
+└── demo/                                  # Interactive demo
     ├── README.md                          # Demo guide with scenarios
-    └── index.html                         # Self-contained static demo app
+    └── images/                            # Screenshots for README
 ```
 
 ## Cost Estimate
