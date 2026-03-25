@@ -1,3 +1,16 @@
+/**
+ * IT Admin Assistant — Floating chat bubble in Admin Console.
+ *
+ * PATH B: Runs directly on EC2's OpenClaw CLI (NOT via AgentCore microVM).
+ *
+ * Architecture:
+ *   Chat bubble → POST /playground/send (tenant_id=port__admin)
+ *   → FastAPI _admin_assistant_direct() → subprocess: openclaw CLI on EC2
+ *   → OpenClaw calls Bedrock directly (bypasses H2 Proxy)
+ *
+ * Completely independent from PATH A (employee agents via AgentCore).
+ * Has real access to EC2 filesystem, services, and logs (read-only).
+ */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { MessageSquare, X, Send, Bot, User, Minimize2, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';

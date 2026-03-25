@@ -142,31 +142,56 @@ The merged SOUL.md is what the agent reads. An SA agent and a Finance agent use 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Admin Console (React + FastAPI)                             │
-│  ├── 19 admin pages (org, agents, SOUL editor, monitor...)  │
-│  ├── 5 employee portal pages (chat, profile, usage...)      │
-│  ├── 3-role RBAC (admin / manager / employee)               │
-│  └── All data from DynamoDB + S3 (zero hardcoded values)    │
+│  ├── 24 pages (19 admin + 5 portal) + M3 Expressive design  │
+│  ├── 3-role RBAC (admin / manager / employee)                │
+│  ├── Dark/light theme toggle                                 │
+│  ├── IT Admin Assistant (floating chat bubble)               │
+│  └── All data from DynamoDB + S3 (zero hardcoded values)     │
 ├─────────────────────────────────────────────────────────────┤
-│  Tenant Router                                               │
-│  ├── Derives tenant_id from channel + user identity          │
-│  ├── Routes to AgentCore Runtime                             │
-│  └── Stateless — all state in AgentCore + S3 + SSM          │
-├─────────────────────────────────────────────────────────────┤
-│  AgentCore Runtime (Firecracker microVM per tenant)          │
-│  ├── workspace_assembler.py → 3-layer SOUL merge from S3    │
-│  ├── skill_loader.py → role-filtered skills from S3          │
-│  ├── OpenClaw CLI → Bedrock (Nova 2 Lite / Sonnet / Pro)    │
-│  ├── Watchdog → memory writeback to S3 every 60s            │
-│  └── Usage tracking → DynamoDB write per invocation          │
+│                                                              │
+│  PATH A: Employee Agents (via AgentCore)                     │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │  IM Message (Discord/Telegram/Slack/WhatsApp/Portal)  │    │
+│  │       ↓                                               │    │
+│  │  OpenClaw Gateway (port 18789)                        │    │
+│  │       ↓                                               │    │
+│  │  H2 Proxy (port 8091) — intercepts Bedrock SDK call   │    │
+│  │       ↓ extracts sender_id from JSON metadata         │    │
+│  │  Tenant Router (port 8090) — derives tenant_id        │    │
+│  │       ↓                                               │    │
+│  │  AgentCore Runtime (Firecracker microVM per tenant)   │    │
+│  │       ↓ workspace_assembler.py → 3-layer SOUL merge   │    │
+│  │  OpenClaw CLI → Bedrock (in microVM)                  │    │
+│  │       ↓                                               │    │
+│  │  Response → H2 Proxy → Gateway → IM channel           │    │
+│  └──────────────────────────────────────────────────────┘    │
+│                                                              │
+│  PATH B: IT Admin Assistant (direct EC2)                     │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │  Admin Console chat bubble                            │    │
+│  │       ↓ POST /api/v1/playground/send (admin)          │    │
+│  │  FastAPI _admin_assistant_direct()                     │    │
+│  │       ↓ subprocess: openclaw agent --message           │    │
+│  │  OpenClaw CLI on EC2 (separate HOME dir)              │    │
+│  │       ↓ direct Bedrock call (bypasses H2 Proxy)       │    │
+│  │  Bedrock (real endpoint, not localhost:8091)           │    │
+│  │       ↓                                               │    │
+│  │  Response → FastAPI → Admin Console                   │    │
+│  └──────────────────────────────────────────────────────┘    │
+│                                                              │
 ├─────────────────────────────────────────────────────────────┤
 │  AWS Services                                                │
-│  ├── DynamoDB — org, agents, bindings, audit, usage          │
+│  ├── DynamoDB — org, agents, bindings, audit, usage, config  │
 │  ├── S3 — SOUL templates, skills, workspaces, knowledge      │
-│  ├── SSM — tenant→position mappings, skill API keys          │
+│  ├── SSM — tenant→position mappings, user-mappings           │
 │  ├── Bedrock — LLM inference (Nova 2 Lite default)           │
-│  └── CloudWatch — agent invocation logs                      │
+│  └── CloudWatch — agent invocation logs, runtime events      │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+**Path A** is for all employee agents — messages go through the Gateway → H2 Proxy → Tenant Router → AgentCore microVM pipeline. Each employee gets an isolated Firecracker microVM with their personalized SOUL, skills, and memory.
+
+**Path B** is for the IT Admin Assistant only — runs directly on the EC2 instance via subprocess, bypasses H2 Proxy entirely, calls Bedrock directly. Has read-only access to the EC2 filesystem, services, and logs. Identity is injected via message prefix (OpenClaw's bootstrap overwrites SOUL.md files).
 
 ## Gateway Architecture: One Bot, All Employees
 
