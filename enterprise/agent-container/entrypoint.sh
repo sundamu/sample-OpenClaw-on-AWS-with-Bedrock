@@ -1,9 +1,9 @@
 #!/bin/bash
 # =============================================================================
 # Agent Container Entrypoint
-# Design: server.py starts immediately (health check ready in seconds).
-# OpenClaw is invoked per-request via CLI subprocess — no long-running process.
-# S3 sync happens in background after server is up.
+# Design: OpenClaw Gateway starts first (port 18789) for native session management.
+# server.py starts immediately for health check. S3 workspace assembled on first request.
+# openclaw agent CLI connects to Gateway → proper memory compaction and session state.
 # =============================================================================
 set -eo pipefail
 
