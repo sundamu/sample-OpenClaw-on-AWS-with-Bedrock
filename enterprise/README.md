@@ -592,18 +592,25 @@ The seed scripts create ACME Corp — a B2B SaaS company with:
 
 ### Demo Accounts
 
-| Employee ID | Name | Role | What They See |
-|-------------|------|------|--------------|
-| emp-z3 | Zhang San | Admin | Full Admin Console |
-| emp-jiade | JiaDe Wang | Admin | Full Admin Console + Discord → SA Agent (full dev tools, cross-session memory ✨) |
-| emp-lin | Lin Xiaoyu | Manager | Product department only |
-| emp-mike | Mike Johnson | Manager | Sales department only |
-| emp-peter | Peter Wu | Manager | Portal/Discord → Executive Agent (strategic tools, no shell/code, memory ✨) |
-| emp-david | David Park | Employee | Portal/Discord → Finance Agent (Excel + SAP, no shell, memory ✨) |
-| emp-w5 | Wang Wu | Employee | Portal: SDE Agent (full dev tools) |
-| emp-carol | Carol Zhang | Employee | Portal: Finance Agent (Excel + SAP only, no shell) |
+> **Executive accounts (Ada, WJD)** run on a separate AgentCore Runtime with Claude Sonnet 4.6, no tool restrictions, and a full-access IAM role. This demonstrates the multi-runtime architecture — different employee groups on different Docker images, models, and IAM roles.
 
-> ✨ = Cross-session memory via S3. Agent recalls previous conversations when you return. Discord pairing required for Discord access — see Bindings → IM User Mappings → Approve Pairing.
+| Employee ID | Name | Role | Runtime | What They Experience |
+|-------------|------|------|---------|---------------------|
+| **emp-ada** | **Ada** | **Executive** | **exec-agent (Claude Sonnet 4.6)** | **No restrictions · All tools · Full S3/Bedrock IAM · Feishu + Telegram ✨🔓** |
+| **emp-wjd** | **WJD** | **Executive** | **exec-agent (Claude Sonnet 4.6)** | **No restrictions · All tools · Full S3/Bedrock IAM · Feishu + Telegram ✨🔓** |
+| emp-z3 | Zhang San | Admin | standard | Full Admin Console |
+| emp-jiade | JiaDe Wang | Admin | standard | Full Admin Console + Discord → SA Agent (memory ✨) |
+| emp-peter | Peter Wu | Manager | standard | Portal/Discord → Executive Agent (memory ✨) |
+| emp-lin | Lin Xiaoyu | Manager | standard | Product department view only |
+| emp-david | David Park | Employee | standard | Portal/Telegram → Finance Agent (Excel + SAP, memory ✨) |
+| emp-w5 | Wang Wu | Employee | standard | Portal + Telegram → SDE Agent (shell/code) |
+| emp-carol | Carol Zhang | Employee | standard | Portal + Telegram → Finance Agent |
+
+> 🔓 = No tool restrictions. Agent can use shell, browser, code_execution, file operations, and all integrations without limits. Runs on dedicated Executive Runtime.
+>
+> ✨ = Cross-session memory via S3. Agent recalls previous conversations when you return.
+>
+> **IM setup:** Telegram (@acme_enterprise_bot), Feishu (enterprise bot), Discord. Connect via Portal → Connect IM (QR code self-service, no admin required).
 
 ## What to Test
 
@@ -613,10 +620,18 @@ Login as Wang Wu (Employee) → Chat → "Who are you?" → **"ACME Corp Softwar
 Same LLM, completely different identities.
 
 ### 2. Permission Boundaries
-Carol: "Run git status" → **Refused** (Finance role has no shell)
-Wang Wu: "Run git status" → **Executed** (SDE role has shell access)
-JiaDe (Discord): Full shell/code access (SA role)
-Peter (Discord): "Run ls" → **Refused** (Executive role, no shell/code)
+Carol: "Run git status" → **Refused** (Finance role, no shell)
+Wang Wu: "Run git status" → **Executed** (SDE role has shell)
+**Ada or WJD: Any command → Executed** (Executive tier, zero restrictions, Claude Sonnet 4.6)
+
+### 2.1 Multi-Runtime Architecture (Executive Tier)
+Login as **Ada** or **WJD** → these accounts route to the **Executive AgentCore Runtime**:
+- Model: Claude Sonnet 4.6 (vs Nova 2 Lite for standard employees)
+- Tools: all unlocked — shell, browser, code_execution, file_write, all integrations
+- IAM: full S3 access (all buckets), all Bedrock models, cross-dept DynamoDB
+- Skills: all 20+ enterprise skills pre-installed (no S3 hot-load, faster cold start)
+
+Same Portal UI, completely different backend — this is the multi-runtime design in action.
 
 ### 3. Manager Data Scoping
 Login as Lin Xiaoyu (Manager) → Dashboard → **Only Product department data visible**

@@ -5,13 +5,15 @@ import { Bot, LogIn, AlertCircle } from 'lucide-react';
 import ClawForgeLogo from '../components/ClawForgeLogo';
 
 const DEMO_ACCOUNTS = [
-  { id: 'emp-z3', name: 'Zhang San', role: 'Admin', dept: 'Engineering', desc: 'Full platform access' },
-  { id: 'emp-jiade', name: 'JiaDe Wang', role: 'Admin', dept: 'Engineering', desc: 'Full admin + SA Agent with memory ✨' },
-  { id: 'emp-lin', name: 'Lin Xiaoyu', role: 'Manager', dept: 'Product', desc: 'Product department view' },
-  { id: 'emp-peter', name: 'Peter Wu', role: 'Manager', dept: 'Engineering', desc: 'Executive Agent with memory ✨' },
-  { id: 'emp-david', name: 'David Park', role: 'Employee', dept: 'Finance', desc: 'Finance Agent with memory ✨' },
-  { id: 'emp-w5', name: 'Wang Wu', role: 'Employee', dept: 'Engineering', desc: 'Portal: SDE Agent (full dev tools)' },
-  { id: 'emp-carol', name: 'Carol Zhang', role: 'Employee', dept: 'Finance', desc: 'Portal: Finance Agent' },
+  { id: 'emp-ada',   name: 'Ada',         role: 'Executive', dept: 'Executive', desc: 'Claude Sonnet 4.6 · No restrictions · All tools · Full S3/Bedrock access 🔓' },
+  { id: 'emp-wjd',   name: 'WJD',         role: 'Executive', dept: 'Executive', desc: 'Claude Sonnet 4.6 · No restrictions · All tools · Full S3/Bedrock access 🔓' },
+  { id: 'emp-z3',    name: 'Zhang San',   role: 'Admin',     dept: 'Engineering', desc: 'Full Admin Console access' },
+  { id: 'emp-jiade', name: 'JiaDe Wang',  role: 'Admin',     dept: 'Engineering', desc: 'Admin + SA Agent with cross-session memory ✨' },
+  { id: 'emp-peter', name: 'Peter Wu',    role: 'Manager',   dept: 'Engineering', desc: 'Executive Agent with memory · Discord ✨' },
+  { id: 'emp-lin',   name: 'Lin Xiaoyu', role: 'Manager',   dept: 'Product',     desc: 'Product department view only' },
+  { id: 'emp-david', name: 'David Park',  role: 'Employee',  dept: 'Finance',     desc: 'Finance Agent · Excel/SAP tools · memory ✨' },
+  { id: 'emp-w5',    name: 'Wang Wu',     role: 'Employee',  dept: 'Engineering', desc: 'Portal + Telegram · SDE Agent (shell/code)' },
+  { id: 'emp-carol', name: 'Carol Zhang', role: 'Employee',  dept: 'Finance',     desc: 'Portal + Telegram · Finance Agent' },
 ];
 
 export default function Login() {
@@ -91,30 +93,44 @@ export default function Login() {
         <div className="rounded-xl border border-dark-border bg-dark-card p-6">
           <h3 className="text-sm font-semibold text-text-muted uppercase tracking-wider mb-3">Demo Accounts</h3>
           <div className="space-y-2">
-            {DEMO_ACCOUNTS.map(acc => (
-              <div
-                key={acc.id}
-                onClick={() => setEmpId(acc.id)}
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-dark-hover transition-colors cursor-pointer"
-              >
-                <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-medium text-white ${
-                  acc.role === 'Admin' ? 'bg-red-500' : acc.role === 'Manager' ? 'bg-amber-500' : 'bg-blue-500'
-                }`}>
-                  {acc.name[0]}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-text-primary">{acc.name}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                      acc.role === 'Admin' ? 'bg-red-500/10 text-red-400' : acc.role === 'Manager' ? 'bg-amber-500/10 text-amber-400' : 'bg-blue-500/10 text-blue-400'
-                    }`}>{acc.role}</span>
+            {DEMO_ACCOUNTS.map(acc => {
+              const isExec = acc.role === 'Executive';
+              return (
+                <div
+                  key={acc.id}
+                  onClick={() => setEmpId(acc.id)}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors cursor-pointer ${
+                    isExec
+                      ? 'bg-warning/5 border border-warning/20 hover:bg-warning/10'
+                      : 'hover:bg-dark-hover'
+                  }`}
+                >
+                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-medium text-white ${
+                    isExec ? 'bg-gradient-to-br from-warning to-orange-500'
+                    : acc.role === 'Admin' ? 'bg-red-500'
+                    : acc.role === 'Manager' ? 'bg-amber-500'
+                    : 'bg-blue-500'
+                  }`}>
+                    {acc.name[0]}
                   </div>
-                  <p className="text-xs text-text-muted">{acc.id} · {acc.desc}</p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-medium ${isExec ? 'text-warning' : 'text-text-primary'}`}>{acc.name}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                        isExec ? 'bg-warning/15 text-warning'
+                        : acc.role === 'Admin' ? 'bg-red-500/10 text-red-400'
+                        : acc.role === 'Manager' ? 'bg-amber-500/10 text-amber-400'
+                        : 'bg-blue-500/10 text-blue-400'
+                      }`}>{acc.role}</span>
+                      {isExec && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 font-medium">Claude Sonnet 4.6</span>}
+                    </div>
+                    <p className="text-xs text-text-muted truncate">{acc.id} · {acc.desc}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
-          <p className="text-[10px] text-text-muted mt-3 text-center">Click to fill Employee ID. Password required for all accounts.</p>
+          <p className="text-[10px] text-text-muted mt-3 text-center">Click to fill Employee ID · Password required for all accounts</p>
         </div>
 
         {/* Contributor */}
