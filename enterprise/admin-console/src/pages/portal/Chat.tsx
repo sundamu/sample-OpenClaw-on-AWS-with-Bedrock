@@ -21,6 +21,7 @@ interface Attachment {
   isText: boolean;
   isImage: boolean;
   contentPreview?: string;
+  s3Uri?: string;  // Persistent S3 path in the agent's workspace bucket
 }
 
 const STORAGE_KEY = 'openclaw_portal_chat';
@@ -139,13 +140,6 @@ export default function PortalChat() {
     if (fileInputRef.current) fileInputRef.current.value = '';
 
     const imgType = file.type.startsWith('image/');
-    const pdfType = file.type === 'application/pdf';
-
-    // Images and PDFs: skip upload, attach as "unsupported" so user knows clearly
-    if (imgType || pdfType) {
-      setAttachment({ name: file.name, size: file.size, type: file.type, isText: false, isImage: imgType });
-      return;
-    }
 
     setUploading(true);
     try {
@@ -161,13 +155,15 @@ export default function PortalChat() {
         const data = await res.json();
         setAttachment({
           name: data.filename, size: data.size, type: data.type,
-          isText: data.isText, isImage: false, contentPreview: data.contentPreview,
+          isText: data.isText, isImage: imgType,
+          contentPreview: data.contentPreview,
+          s3Uri: data.s3Uri,
         });
       } else {
-        setAttachment({ name: file.name, size: file.size, type: file.type, isText: false, isImage: false });
+        setAttachment({ name: file.name, size: file.size, type: file.type, isText: false, isImage: imgType });
       }
     } catch {
-      setAttachment({ name: file.name, size: file.size, type: file.type, isText: false, isImage: false });
+      setAttachment({ name: file.name, size: file.size, type: file.type, isText: false, isImage: imgType });
     }
     setUploading(false);
   };
@@ -181,14 +177,23 @@ export default function PortalChat() {
     // Build the message content — attach file content inline
     let fullContent = text;
     if (attachment) {
-      if (attachment.isText && attachment.contentPreview) {
+      if (attachment.s3Uri) {
+        // Primary reference: persistent S3 path in agent's workspace bucket.
+        // The agent's IAM role has full S3 access to this bucket.
+        // Exec-tier agents can: aws s3 cp <uri> /tmp/<name> && cat /tmp/<name>
+        // Standard agents: file is synced to workspace/uploads/ on next cold start.
         const ext = attachment.name.split('.').pop() || '';
-        fullContent += `\n\nI'm sharing the following file content with you directly in this message. The content is complete and ready for you to read and analyze — no need to access any file system or S3.\n\n**File: ${attachment.name}** (${fmtSize(attachment.size)})\n\`\`\`${ext}\n${attachment.contentPreview}\n\`\`\``;
+        fullContent += `\n\n文件路径: ${attachment.s3Uri}\n文件名: ${attachment.name} (${fmtSize(attachment.size)})`;
+        if (attachment.isText && attachment.contentPreview) {
+          // Text files: also embed content inline so agent can read immediately
+          // without needing shell access
+          fullContent += `\n\n文件内容 (inline):\n\`\`\`${ext}\n${attachment.contentPreview}\n\`\`\``;
+        }
       } else if (attachment.isImage) {
-        // Agent can't view images yet — tell it clearly and ask it to guide the user
-        fullContent += `\n\n[The user is trying to share an image file: **${attachment.name}** (${fmtSize(attachment.size)}). Image viewing is not yet supported in this interface. Please acknowledge this and ask the user to describe the image content, paste relevant text, or explain what they need help with.]`;
+        // Image selected but not uploaded (no s3Uri) — guide the agent
+        fullContent += `\n\n[用户尝试分享图片: ${attachment.name} (${fmtSize(attachment.size)})，但上传失败。请告知用户无法查看图片，建议描述图片内容或将所需信息以文字形式发送。]`;
       } else {
-        fullContent += `\n\n[The user shared a binary file: **${attachment.name}** (${fmtSize(attachment.size)}, ${attachment.type}). You cannot read this file. Please ask the user to share the content as text instead.]`;
+        fullContent += `\n\n[用户尝试分享文件: ${attachment.name}，但上传失败。请告知用户重试。]`;
       }
     }
 
@@ -341,10 +346,12 @@ export default function PortalChat() {
               : <FileText size={14} className="text-primary shrink-0" />}
             <span className="text-xs font-medium text-text-primary truncate">{attachment.name}</span>
             <span className="text-[10px] text-text-muted shrink-0">{fmtSize(attachment.size)}</span>
-            {attachment.isText
-              ? <span className="text-[10px] text-success shrink-0">content ready</span>
+            {attachment.s3Uri
+              ? <span className="text-[10px] text-success shrink-0">
+                  {attachment.isText ? 'uploaded · content inline' : 'uploaded to S3'}
+                </span>
               : <span className="text-[10px] text-warning shrink-0">
-                  {attachment.isImage ? 'image — agent will ask you to describe it' : 'binary — not readable'}
+                  {attachment.isImage ? 'image · upload pending' : 'upload failed'}
                 </span>
             }
             <button onClick={() => setAttachment(null)} className="text-text-muted hover:text-danger ml-1 shrink-0">

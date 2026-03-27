@@ -1750,6 +1750,7 @@ async def portal_upload(
     except Exception as e:
         print(f"[upload] S3 write failed: {e}")
 
+    s3_uri = f"s3://{s3ops.bucket()}/{s3_key}"
     return {
         "filename": filename,
         "size": size,
@@ -1757,6 +1758,7 @@ async def portal_upload(
         "isText": is_text,
         "contentPreview": content_preview,
         "s3Key": s3_key,
+        "s3Uri": s3_uri,
     }
 
 
