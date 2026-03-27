@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -1701,6 +1701,64 @@ def pair_complete(body: PairCompleteRequest):
 
 class PortalChatMessage(BaseModel):
     message: str
+
+
+@app.post("/api/v1/portal/upload")
+async def portal_upload(
+    file: UploadFile,
+    authorization: str = Header(default=""),
+):
+    """Upload a file from the employee portal. Text files have their content returned
+    so the agent can read them inline. Binary / image files are stored to S3."""
+    user = _require_auth(authorization)
+
+    filename = file.filename or "upload"
+    content_type = file.content_type or "application/octet-stream"
+    raw = await file.read()
+    size = len(raw)
+
+    # Determine if we can extract text content
+    text_extensions = {".txt", ".md", ".csv", ".json", ".py", ".js", ".ts", ".sh",
+                       ".yaml", ".yml", ".xml", ".html", ".sql", ".log", ".env",
+                       ".toml", ".cfg", ".ini", ".java", ".go", ".rs", ".rb", ".php"}
+    import os as _os
+    ext = _os.path.splitext(filename)[1].lower()
+    is_text = ext in text_extensions or content_type.startswith("text/")
+
+    content_preview: str | None = None
+    if is_text:
+        try:
+            text = raw.decode("utf-8", errors="replace")
+            # Limit to 8KB inline (agent context window)
+            content_preview = text[:8192]
+            if len(text) > 8192:
+                content_preview += f"\n\n[... truncated — {len(text)} chars total]"
+        except Exception:
+            pass
+
+    # Store file in S3
+    ts = int(time.time())
+    s3_key = f"{user.employee_id}/workspace/uploads/{ts}_{filename}"
+    try:
+        import boto3 as _b3up
+        _b3up.client("s3").put_object(
+            Bucket=s3ops.bucket(),
+            Key=s3_key,
+            Body=raw,
+            ContentType=content_type,
+        )
+    except Exception as e:
+        print(f"[upload] S3 write failed: {e}")
+
+    return {
+        "filename": filename,
+        "size": size,
+        "type": content_type,
+        "isText": is_text,
+        "contentPreview": content_preview,
+        "s3Key": s3_key,
+    }
+
 
 @app.post("/api/v1/portal/chat")
 def portal_chat(body: PortalChatMessage, authorization: str = Header(default="")):
