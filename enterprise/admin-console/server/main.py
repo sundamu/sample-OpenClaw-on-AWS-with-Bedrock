@@ -1641,10 +1641,16 @@ def pair_complete(body: PairCompleteRequest):
     emp_id = item["employeeId"]
     channel = item.get("channel", body.channel)
 
-    # Write SSM mapping: channel__channelUserId → emp_id
-    _write_user_mapping(channel, body.channelUserId, emp_id)
-    # Also write bare user_id mapping for fallback lookup
-    _write_user_mapping("", body.channelUserId, emp_id)
+    # Write SSM mapping — must use us-east-1 (where agent container reads from)
+    # pair_complete is the only endpoint called by H2 Proxy, so we need explicit region
+    import boto3 as _b3_pair
+    _ssm_pair = _b3_pair.client("ssm", region_name="us-east-1")
+    _prefix = _mapping_prefix()
+    for key in [f"{channel}__{body.channelUserId}", body.channelUserId]:
+        try:
+            _ssm_pair.put_parameter(Name=f"{_prefix}{key}", Value=emp_id, Type="String", Overwrite=True)
+        except Exception as e:
+            print(f"[pair-complete] SSM write failed key={key}: {e}")
 
     # Resolve employee name for confirmation message
     emps = db.get_employees()

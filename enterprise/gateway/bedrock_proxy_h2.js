@@ -597,7 +597,8 @@ server.on('stream', (stream, headers) => {
       // Safety: only intercepts exact pattern /start [A-Z0-9]{10,16}
       // On any error (invalid token, network, etc.) → falls through to normal routing
       // =====================================================================
-      const pairMatch = userText.trim().match(/^\/start\s+([A-Za-z0-9]{10,16})$/);
+      // Search anywhere in userText — the /start TOKEN appears after OpenClaw's metadata blocks
+      const pairMatch = userText.match(/\/start\s+([A-Za-z0-9]{10,16})/);
       if (pairMatch && userId !== 'unknown' && channel !== 'unknown') {
         const token = pairMatch[1].toUpperCase();
         try {

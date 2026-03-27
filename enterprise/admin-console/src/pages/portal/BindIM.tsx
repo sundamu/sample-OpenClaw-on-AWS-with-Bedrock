@@ -9,13 +9,18 @@ interface Channel {
   icon: string;
   description: string;
   available: boolean;
+  note?: 'coming-soon' | 'not-enterprise';
 }
 
 const CHANNELS: Channel[] = [
   { id: 'telegram', label: 'Telegram', icon: '✈️', description: 'Scan QR or click the link to open @acme_enterprise_bot', available: true },
   { id: 'discord', label: 'Discord', icon: '🎮', description: 'Connect to ACME Agent in your company Discord server', available: true },
-  { id: 'slack', label: 'Slack', icon: '💬', description: 'Connect to ACME Agent in your Slack workspace', available: false },
-  { id: 'feishu', label: 'Feishu / Lark', icon: '🪶', description: 'Connect to the enterprise Feishu bot', available: false },
+  { id: 'slack', label: 'Slack', icon: '💬', description: 'Connect to ACME Agent in your Slack workspace', available: false, note: 'coming-soon' },
+  { id: 'feishu', label: 'Feishu / Lark', icon: '🪶', description: 'Connect to the enterprise Feishu bot', available: false, note: 'coming-soon' },
+  { id: 'teams', label: 'Microsoft Teams', icon: '🟦', description: 'Connect to ACME Agent in Microsoft Teams', available: false, note: 'coming-soon' },
+  { id: 'googlechat', label: 'Google Chat', icon: '💬', description: 'Connect to ACME Agent in Google Chat', available: false, note: 'coming-soon' },
+  { id: 'whatsapp', label: 'WhatsApp', icon: '📱', description: 'Personal messaging — not recommended for enterprise use', available: false, note: 'not-enterprise' },
+  { id: 'wechat', label: 'WeChat', icon: '🟢', description: 'Personal messaging — not recommended for enterprise use', available: false, note: 'not-enterprise' },
 ];
 
 type StepState = 'idle' | 'loading' | 'waiting' | 'done' | 'error' | 'expired';
@@ -215,15 +220,24 @@ export default function BindIM() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {CHANNELS.map(ch => {
           const isConnected = connected.includes(ch.id);
+          const isNotEnterprise = ch.note === 'not-enterprise';
+          const isComingSoon = ch.note === 'coming-soon';
           return (
-            <Card key={ch.id} className={`cursor-pointer transition-all ${!ch.available ? 'opacity-50 cursor-not-allowed' : 'hover:border-primary/40'}`}>
+            <Card key={ch.id} className={`transition-all ${
+              !ch.available
+                ? isNotEnterprise
+                  ? 'opacity-40 cursor-not-allowed grayscale'
+                  : 'opacity-50 cursor-not-allowed'
+                : 'cursor-pointer hover:border-primary/40'
+            }`}>
               <div className="flex items-start gap-3">
                 <span className="text-2xl">{ch.icon}</span>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
+                  <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                     <h3 className="text-sm font-semibold text-text-primary">{ch.label}</h3>
                     {isConnected && <Badge color="success" dot>Connected</Badge>}
-                    {!ch.available && <Badge color="default">Coming soon</Badge>}
+                    {isComingSoon && <Badge color="info">Coming soon</Badge>}
+                    {isNotEnterprise && <Badge color="default">Not for enterprise</Badge>}
                   </div>
                   <p className="text-xs text-text-muted">{ch.description}</p>
                 </div>
@@ -231,14 +245,19 @@ export default function BindIM() {
               {ch.available && (
                 <div className="mt-3">
                   {isConnected ? (
-                    <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => ch.available && setSelected(ch)}>
+                    <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setSelected(ch)}>
                       Reconnect
                     </Button>
                   ) : (
-                    <Button variant="primary" size="sm" className="w-full" onClick={() => ch.available && setSelected(ch)}>
+                    <Button variant="primary" size="sm" className="w-full" onClick={() => setSelected(ch)}>
                       <Link2 size={13} /> Connect
                     </Button>
                   )}
+                </div>
+              )}
+              {isComingSoon && (
+                <div className="mt-3">
+                  <p className="text-[10px] text-text-muted text-center">Enterprise support coming soon</p>
                 </div>
               )}
             </Card>
