@@ -874,7 +874,7 @@ Resources:
           FromPort: 2049
           ToPort: 2049
           SourceSecurityGroupId: !Ref OpenClawSecurityGroup
-          Description: "EC2 gateway → EFS"
+          Description: "EC2 gateway to EFS NFS"
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: "0.0.0.0/0"
@@ -917,7 +917,7 @@ Resources:
           FromPort: 8080
           ToPort: 8080
           SourceSecurityGroupId: !Ref OpenClawSecurityGroup
-          Description: "Tenant Router on EC2 → agent container"
+          Description: "Tenant Router on EC2 to agent container port 8080"
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: "0.0.0.0/0"
@@ -1011,7 +1011,7 @@ Resources:
       FromPort: 2049
       ToPort: 2049
       SourceSecurityGroupId: !Ref AlwaysOnTaskSecurityGroup
-      Description: "ECS always-on tasks → EFS"
+      Description: "ECS always-on tasks to EFS NFS"
 
   # ECS Cluster for always-on agents
   AlwaysOnEcsCluster:
@@ -1037,11 +1037,14 @@ Resources:
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
       ExecutionRoleArn: !GetAtt AlwaysOnEcsTaskRole.Arn
       TaskRoleArn: !GetAtt AlwaysOnEcsTaskRole.Arn
       ContainerDefinitions:
         - Name: always-on-agent
-          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${MultitenancyEcrRepository.RepositoryName}:latest"
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${MultitenancyEcrRepository}:latest"
           PortMappings:
             - ContainerPort: 8080
               Protocol: tcp
