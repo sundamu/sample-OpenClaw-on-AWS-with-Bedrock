@@ -15,7 +15,8 @@ def seed(table_name: str, region: str):
         "default": {"modelId": "global.amazon.nova-2-lite-v1:0", "modelName": "Amazon Nova 2 Lite", "inputRate": "0.30", "outputRate": "2.50"},
         "fallback": {"modelId": "us.amazon.nova-pro-v1:0", "modelName": "Amazon Nova Pro", "inputRate": "0.80", "outputRate": "3.20"},
         "positionOverrides": {
-            "pos-sa": {"modelId": "global.anthropic.claude-sonnet-4-5-20250929-v1:0", "modelName": "Claude Sonnet 4.5", "inputRate": "3.00", "outputRate": "15.00", "reason": "Deep reasoning for architecture reviews"},
+            "pos-exec":  {"modelId": "global.anthropic.claude-sonnet-4-6", "modelName": "Claude Sonnet 4.6", "inputRate": "3.00", "outputRate": "15.00", "reason": "Executive tier — highest capability"},
+            "pos-sa":    {"modelId": "global.anthropic.claude-sonnet-4-5-20250929-v1:0", "modelName": "Claude Sonnet 4.5", "inputRate": "3.00", "outputRate": "15.00", "reason": "Deep reasoning for architecture reviews"},
             "pos-legal": {"modelId": "us.amazon.nova-pro-v1:0", "modelName": "Amazon Nova Pro", "inputRate": "0.80", "outputRate": "3.20", "reason": "Balanced capability for legal analysis"},
         },
         "availableModels": [

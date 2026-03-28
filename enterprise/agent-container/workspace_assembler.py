@@ -62,9 +62,10 @@ def get_tenant_position(ssm, stack_name: str, tenant_id: str) -> str:
     if len(parts) >= 3:
         # Format: channel__user_id__hash — extract user_id
         base_id = parts[1]
-    elif len(parts) == 2 and len(parts[1]) > 10:
-        # Format: user_id__hash — strip hash
-        base_id = parts[0]
+    elif len(parts) == 2:
+        # Format: channel__user_id (e.g. personal__emp-dickson, portal__emp-jiade)
+        # Take the second part (user_id), not the first (channel prefix)
+        base_id = parts[1]
 
     if base_id != tenant_id:
         try:
