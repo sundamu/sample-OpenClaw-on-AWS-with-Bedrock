@@ -558,8 +558,9 @@ Turn ON → copy the URL → open in incognito → chat with the AI version of t
 Turn OFF → incognito tab gets 404 immediately
 
 ### 3. Org Directory (Knowledge Base)
-Ask any agent: *"I need a code review done, who should I contact and what should I say?"*
-→ Agent looks up the org directory KB and recommends the right SA/SDE with their email and talking points
+Ask any agent: *"认识 Peter 吗？他负责什么？"* or *"I need a code review — who should I contact?"*
+→ Agent reads `kb-org-directory` (seeded into every position) and answers with the right person's name, role, IM channel, and agent capabilities
+→ Works out-of-box after running `seed_knowledge_docs.py` — no manual KB assignment needed
 
 ### 4. Permission Boundaries
 Carol: "Run git status" → **Refused** (Finance, no shell)
@@ -576,6 +577,8 @@ Login as **Ada** or **WJD** → these route to the Executive AgentCore Runtime:
 Chat as Peter Wu (Discord) → come back after 15 min → **agent recalls previous conversation**
 Same memory shared across Discord, Telegram, and Portal.
 
+> **How it works:** Each turn is synced to S3 immediately after the response (not just on session end). The next microVM downloads the workspace at session start and has full context. If memory doesn't appear, re-run `seed_all_workspaces.py` to reset S3 workspace state.
+
 ### 7. IM Channel Management (Admin)
 Admin Console → **IM Channels** → select Discord tab → see JiaDe, David, Peter connected
 → view pairing date, session count, last active
@@ -591,10 +594,18 @@ Agent Factory → **Configuration tab** → set Sonnet 4.5 for Solutions Archite
 → set `language: 中文` for any position → agents default to Chinese
 
 ### 10. Knowledge Base Assignments
-Knowledge Base → **Assignments tab** → verify that positions have `kb-policies` and `kb-onboarding` pre-assigned (seeded by default)
-→ agents can now answer org policy and onboarding questions
-→ add `kb-arch` to Engineering positions for architecture standards
-→ to add a new KB: upload a Markdown file → assign to positions → agents pick it up on next cold start
+Knowledge Base → **Assignments tab** → all positions are pre-assigned these KBs by default:
+
+| KB | Scope | What agents get |
+|----|-------|----------------|
+| `kb-org-directory` | All | Full employee directory — who does what, how to reach them |
+| `kb-policies` | All | Data handling, security baseline, code of conduct |
+| `kb-onboarding` | All | New hire checklist, setup guide |
+| `kb-arch` / `kb-runbooks` | Engineering | Architecture standards, runbooks |
+| `kb-finance` | Finance | Financial reports and policies |
+| `kb-hr` | HR | HR policies |
+
+To add a new KB: Admin Console → Knowledge Base → upload Markdown → Assignments tab → assign to positions → agents pick it up on next cold start.
 
 ## Demo Accounts
 
@@ -621,12 +632,14 @@ Knowledge Base → **Assignments tab** → verify that positions have `kb-polici
 |----------|----------|-------------|
 | `ADMIN_PASSWORD` | Yes | Login password. Production: store in SSM SecureString |
 | `JWT_SECRET` | Yes | JWT signing key. Generate: `openssl rand -hex 32` |
-| `AWS_REGION` | Yes | DynamoDB region (default: `us-east-2`) |
-| `PUBLIC_URL` | No | Base URL for Digital Twin links (default: `https://openclaw.awspsa.com`) |
+| `AWS_REGION` | Yes | Deployment region for EC2, SSM, ECR, AgentCore (default: `us-east-1`) |
+| `GATEWAY_INSTANCE_ID` | Yes | EC2 instance ID — required for always-on container start/stop via SSM. Set in `/etc/openclaw/env`. Falls back to IMDSv2 if not set. |
+| `PUBLIC_URL` | No | Base URL for Digital Twin links (default: `https://openclaw.awspsa.com`) — **set this** for correct twin URLs |
+| `AGENT_ECR_IMAGE` | No | ECR image URI for always-on containers. Auto-built from `$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/$STACK_NAME-multitenancy-agent:latest` if not set. |
 | `CONSOLE_PORT` | No | Admin Console port (default: `8099`) |
 | `TENANT_ROUTER_URL` | No | Tenant Router URL (default: `http://localhost:8090`) |
 | `DYNAMODB_TABLE` | No | Table name (default: `openclaw-enterprise`) |
-| `AGENT_ECR_IMAGE` | No | ECR image for always-on containers |
+| `DYNAMODB_REGION` | No | DynamoDB region if different from `AWS_REGION` (default: `us-east-2`) |
 
 ## Sample Organization
 
@@ -638,7 +651,7 @@ Knowledge Base → **Assignments tab** → verify that positions have `kb-polici
 | Agents | 29 | Personal + shared |
 | IM Channels | 5 | Telegram, Feishu, Discord, Portal, + always-on |
 | Skills | 26 | Role-scoped skill packages |
-| Knowledge Docs | 13 | + auto-generated org directory |
+| Knowledge Docs | 14 | 11 topic KBs + company-directory.md (org directory, auto-assigned to all positions) |
 | SOUL Templates | 12 | 1 global + 11 position-specific |
 | RBAC Roles | 3 | Admin, Manager, Employee |
 
@@ -666,7 +679,7 @@ vs ChatGPT Team ($25/user × 27 = $675/month) → **90% cheaper** with full ente
 | **Digital Twin (public agent URL)** | ❌ | ❌ | ✅ Shareable, revocable |
 | **Always-on team agents** | ❌ | ❌ | ✅ Docker on EC2, 0ms cold start |
 | **Self-service IM pairing** | ❌ | ❌ | ✅ QR code, 30-second setup |
-| **Org directory KB** | ❌ | ❌ | ✅ Auto-generated, always current |
+| **Org directory KB** | ❌ | ❌ | ✅ Seeded from org data, injected into every agent |
 | Self-hosted, data in your VPC | ❌ | ❌ | ✅ Bedrock in your account |
 | Open source | ❌ | ❌ | ✅ OpenClaw + AWS native |
 | Cost for 27 users | $675/mo | $810/mo | ~$65/mo |
@@ -749,6 +762,19 @@ aws bedrock-agentcore-control update-agent-runtime \
 ```
 
 **Always pass `--environment-variables`** — AgentCore clears env vars if the field is omitted.
+
+### Reminders and Scheduled Tasks
+
+OpenClaw's reminder system writes a `HEARTBEAT.md` to the agent's workspace and sends the notification through the active channel at the scheduled time.
+
+| Agent Type | Reminder Behavior |
+|-----------|-----------------|
+| **Always-on (Docker)** | Fully supported — container is persistent, heartbeat fires on schedule. Delivery channel is read from `CHANNELS.md` in the workspace (auto-injected at session start from IM pairings). |
+| **Personal (AgentCore microVM)** | Heartbeat is set, `HEARTBEAT.md` synced to S3 immediately after the response. Fires on the **next session start** when the microVM loads the workspace. If no new message arrives before the scheduled time, the reminder is deferred to the next interaction. |
+
+**For reliable reminders:** use an always-on agent, or connect via an IM channel (Discord/Telegram) where sessions are more continuous. Portal (webchat) users should configure a preferred IM channel so reminders can fall back to Discord/Telegram delivery.
+
+`CHANNELS.md` is automatically written to each employee's workspace during session assembly (reverse-lookup of their SSM IM pairings). No manual configuration needed once the user has paired an IM channel.
 
 ### H2 Proxy and Tenant Router — systemd Services
 
