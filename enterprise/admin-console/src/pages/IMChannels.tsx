@@ -46,7 +46,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   whatsapp: 'WhatsApp', wechat: 'WeChat',
 };
 
-const ENTERPRISE_CHANNELS = ['telegram', 'discord', 'feishu', 'slack', 'teams', 'googlechat'];
+const ENTERPRISE_CHANNELS = ['telegram', 'discord', 'feishu', 'dingtalk', 'slack', 'teams', 'googlechat', 'whatsapp'];
 
 // ─── Connection Row ───────────────────────────────────────────────────────────
 

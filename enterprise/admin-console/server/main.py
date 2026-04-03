@@ -1904,6 +1904,20 @@ def pair_start(body: PairStartRequest, authorization: str = Header(default="")):
     }
 
 
+@app.get("/api/v1/portal/im-channel-status")
+def portal_im_channel_status(authorization: str = Header(default="")):
+    """Return which IM channels the admin has configured via OpenClaw Gateway.
+    Used by employee portal to show 'available' vs 'admin not configured'."""
+    _require_auth(authorization)
+    channels = _run_openclaw_channels()
+    configured = set()
+    for ch in channels:
+        name = (ch.get("channel") or ch.get("id", "")).lower()
+        if name:
+            configured.add(name)
+    return {"configured": sorted(configured)}
+
+
 @app.get("/api/v1/portal/channel/pair-status")
 def pair_status(token: str, authorization: str = Header(default="")):
     """Poll pairing status. Returns pending / completed / expired."""
@@ -4332,7 +4346,7 @@ def get_im_channels(authorization: str = Header(default="")):
         resp = ssm.get_parameters_by_path(Path=prefix, Recursive=True, MaxResults=10)
         for p in resp.get("Parameters", []):
             name = p["Name"].replace(prefix, "")
-            for ch in ["telegram", "discord", "slack", "whatsapp", "feishu", "teams"]:
+            for ch in ["telegram", "discord", "slack", "whatsapp", "feishu", "dingtalk", "teams", "googlechat"]:
                 if name.startswith(f"{ch}__"):
                     channel_counts[ch] = channel_counts.get(ch, 0) + 1
                     break
@@ -4347,14 +4361,15 @@ def get_im_channels(authorization: str = Header(default="")):
 
     # Build enriched channel list
     all_channels = [
-        {"id": "telegram", "label": "Telegram", "enterprise": True},
-        {"id": "discord", "label": "Discord", "enterprise": True},
-        {"id": "slack", "label": "Slack", "enterprise": True},
-        {"id": "teams", "label": "Microsoft Teams", "enterprise": True},
-        {"id": "feishu", "label": "Feishu / Lark", "enterprise": True},
-        {"id": "googlechat", "label": "Google Chat", "enterprise": True},
-        {"id": "whatsapp", "label": "WhatsApp", "enterprise": False},
-        {"id": "wechat", "label": "WeChat", "enterprise": False},
+        {"id": "telegram",   "label": "Telegram",          "enterprise": True},
+        {"id": "discord",    "label": "Discord",            "enterprise": True},
+        {"id": "slack",      "label": "Slack",              "enterprise": True},
+        {"id": "teams",      "label": "Microsoft Teams",    "enterprise": True},
+        {"id": "feishu",     "label": "Feishu / Lark",      "enterprise": True},
+        {"id": "dingtalk",   "label": "DingTalk",           "enterprise": True},
+        {"id": "googlechat", "label": "Google Chat",        "enterprise": True},
+        {"id": "whatsapp",   "label": "WhatsApp",           "enterprise": True},
+        {"id": "wechat",     "label": "WeChat",             "enterprise": False},
     ]
 
     gw_by_channel = {ch["channel"]: ch for ch in gateway_channels}

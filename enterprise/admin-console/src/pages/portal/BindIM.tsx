@@ -7,21 +7,21 @@ import { IM_ICONS } from '../../components/IMIcons';
 interface Channel {
   id: string;
   label: string;
-  icon: string;
   description: string;
-  available: boolean;
-  note?: 'coming-soon' | 'not-enterprise';
 }
 
+// All mainstream IM platforms. Availability is determined dynamically by
+// fetching which channels the admin has configured via OpenClaw Gateway.
 const CHANNELS: Channel[] = [
-  { id: 'telegram', label: 'Telegram', icon: '', description: 'Scan QR or click the link to open @acme_enterprise_bot', available: true },
-  { id: 'discord', label: 'Discord', icon: '', description: 'Connect to ACME Agent in your company Discord server', available: true },
-  { id: 'slack', label: 'Slack', icon: '', description: 'Connect to ACME Agent in your Slack workspace', available: false, note: 'coming-soon' },
-  { id: 'teams', label: 'Microsoft Teams', icon: '', description: 'Connect to ACME Agent in Microsoft Teams', available: false, note: 'coming-soon' },
-  { id: 'feishu', label: 'Feishu / Lark', icon: '', description: 'Connect to the enterprise Feishu bot', available: true },
-  { id: 'googlechat', label: 'Google Chat', icon: '', description: 'Connect to ACME Agent in Google Chat', available: false, note: 'coming-soon' },
-  { id: 'whatsapp', label: 'WhatsApp', icon: '', description: 'Personal messaging — not recommended for enterprise use', available: false, note: 'not-enterprise' },
-  { id: 'wechat', label: 'WeChat', icon: '', description: 'Personal messaging — not recommended for enterprise use', available: false, note: 'not-enterprise' },
+  { id: 'telegram',   label: 'Telegram',         description: 'Scan QR or click the link to open the enterprise bot' },
+  { id: 'discord',    label: 'Discord',           description: 'Connect to the enterprise agent in your company Discord server' },
+  { id: 'feishu',     label: 'Feishu / Lark',     description: 'Connect to the enterprise Feishu bot' },
+  { id: 'dingtalk',   label: 'DingTalk',          description: 'Connect to the enterprise DingTalk bot' },
+  { id: 'slack',      label: 'Slack',             description: 'Connect to the enterprise agent in your Slack workspace' },
+  { id: 'teams',      label: 'Microsoft Teams',   description: 'Connect to the enterprise agent in Microsoft Teams' },
+  { id: 'googlechat', label: 'Google Chat',       description: 'Connect to the enterprise agent in Google Chat' },
+  { id: 'whatsapp',   label: 'WhatsApp',          description: 'Connect via WhatsApp Business' },
+  { id: 'wechat',     label: 'WeChat',            description: 'Connect via WeChat enterprise bot' },
 ];
 
 type StepState = 'idle' | 'feishu-prereq' | 'loading' | 'waiting' | 'done' | 'error' | 'expired';
@@ -275,7 +275,15 @@ export default function BindIM() {
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
   const [channelInfo, setChannelInfo] = useState<any>(null);
+  const [adminConfigured, setAdminConfigured] = useState<string[]>([]);
   const connectedRef = useRef<string[]>([]);
+
+  // Fetch which channels admin has configured via OpenClaw Gateway
+  useEffect(() => {
+    api.get<{ configured: string[] }>('/portal/im-channel-status')
+      .then(d => setAdminConfigured(d.configured || []))
+      .catch(() => {});
+  }, []);
 
   const fetchChannels = useCallback(() => {
     api.get<any>('/portal/channels').then(d => {
@@ -366,15 +374,10 @@ export default function BindIM() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {CHANNELS.map(ch => {
           const isConnected = connected.includes(ch.id);
-          const isNotEnterprise = ch.note === 'not-enterprise';
-          const isComingSoon = ch.note === 'coming-soon';
+          const isAvailable = adminConfigured.includes(ch.id);
           return (
             <Card key={ch.id} className={`transition-all ${
-              !ch.available
-                ? isNotEnterprise
-                  ? 'opacity-40 cursor-not-allowed grayscale'
-                  : 'opacity-50 cursor-not-allowed'
-                : 'cursor-pointer hover:border-primary/40'
+              isAvailable ? 'cursor-pointer hover:border-primary/40' : 'opacity-60'
             }`}>
               <div className="flex items-start gap-3">
                 <div className="flex-shrink-0 mt-0.5">{(() => { const Icon = IM_ICONS[ch.id]; return Icon ? <Icon size={28} /> : null; })()}</div>
@@ -382,15 +385,14 @@ export default function BindIM() {
                   <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                     <h3 className="text-sm font-semibold text-text-primary">{ch.label}</h3>
                     {isConnected && <Badge color="success" dot>Connected</Badge>}
-                    {isComingSoon && <Badge color="info">Coming soon</Badge>}
-                    {isNotEnterprise && <Badge color="default">Not for enterprise</Badge>}
+                    {!isAvailable && <Badge color="default">Admin not configured</Badge>}
                   </div>
                   <p className="text-xs text-text-muted">
-                    {instructions[ch.id] || ch.description}
+                    {isAvailable ? (instructions[ch.id] || ch.description) : 'Contact your IT admin to enable this channel.'}
                   </p>
                 </div>
               </div>
-              {ch.available && (
+              {isAvailable && (
                 <div className="mt-3 space-y-1.5">
                   {isConnected ? (
                     <>
@@ -421,11 +423,6 @@ export default function BindIM() {
                       <Link2 size={13} /> Connect
                     </Button>
                   )}
-                </div>
-              )}
-              {isComingSoon && (
-                <div className="mt-3">
-                  <p className="text-[10px] text-text-muted text-center">Enterprise support coming soon</p>
                 </div>
               )}
             </Card>
