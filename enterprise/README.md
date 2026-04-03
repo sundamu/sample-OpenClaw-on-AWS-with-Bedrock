@@ -83,6 +83,7 @@ Additional controls: no public ports (SSM only) · IAM roles throughout, no hard
 | **Position → Runtime Routing** | 3-tier routing chain: employee override → position rule → default. Assign positions to runtimes from Security Center UI, propagates to all members automatically |
 | **Per-Employee Model Config** | Override model, context window, compaction settings, and response language at position OR employee level from Agent Factory → Configuration tab |
 | **IM Channel Management** | Admin sees every employee's IM connections grouped by channel — when they paired, session count, last active, one-click disconnect |
+| **Org CRUD** | Full create/edit/delete for Departments, Positions, and Employees from Admin Console. Delete is guarded: blocks if employees or bindings exist, prompts force-cascade delete |
 | **Security Center** | Live AWS resource browser — ECR images, IAM roles, VPC security groups with console links. Configure runtime images and IAM roles from the UI |
 | **Three-Layer Memory Guarantee** | Per-turn S3 checkpoint (1-message sessions), SIGTERM flush (idle timeout), Gateway compaction (long sessions). Same memory across Discord, Telegram, Feishu, and Portal |
 | **Dynamic Config, Zero Redeploy** | Change model, tool permissions, SOUL content, or KB assignments → takes effect on next cold start. No container rebuild, no runtime update |
@@ -475,25 +476,29 @@ ADMIN_PASSWORD=your-password     # admin console login password
 # Optional: use existing VPC instead of creating a new one
 # EXISTING_VPC_ID=vpc-0abc123
 # EXISTING_SUBNET_ID=subnet-0abc123
+
+# Optional: custom S3 bucket name — required when deploying multiple stacks in the same account
+# (e.g. staging + production in the same AWS account)
+# WORKSPACE_BUCKET_NAME=openclaw-tenants-123456789-staging
 ```
 
-Then run the deploy script — it handles everything:
+Then run the deploy script — it handles everything, **including the Docker build on the gateway EC2 (no local Docker required)**:
 
 ```bash
 bash deploy.sh
-# ~15 minutes total: CloudFormation → Docker build → AgentCore Runtime → DynamoDB seed
+# ~15 minutes total: CloudFormation → EC2 Docker build → AgentCore Runtime → DynamoDB seed
 ```
 
 To re-deploy after code changes without rebuilding the Docker image or re-seeding:
 
 ```bash
-bash deploy.sh --skip-build   # update infra only
+bash deploy.sh --skip-build   # update infra only, skip Docker build
 bash deploy.sh --skip-seed    # update infra + image, skip DynamoDB
 ```
 
 **What `deploy.sh` does automatically:**
 1. Deploys CloudFormation (EC2, ECR, S3, IAM — creates or updates)
-2. Builds and pushes ARM64 agent container to ECR
+2. Packages source code → uploads to S3 → **triggers Docker build on the gateway EC2 via SSM** (ARM64 Graviton, no local Docker needed)
 3. Creates or updates AgentCore Runtime
 4. Creates DynamoDB table if it doesn't exist
 5. Seeds org data (employees, positions, departments, SOUL templates, knowledge docs)
@@ -982,6 +987,60 @@ sudo systemctl daemon-reload
 sudo systemctl enable bedrock-proxy-h2 tenant-router
 sudo systemctl start bedrock-proxy-h2 tenant-router
 ```
+
+## Troubleshooting
+
+### CloudFormation stack deletion fails on PrivateSubnet
+
+**Symptom:** `aws cloudformation delete-stack` gets stuck, then reports `DELETE_FAILED` with:
+```
+The subnet 'subnet-xxx' has dependencies and cannot be deleted.
+```
+
+**Cause:** AWS GuardDuty automatically creates managed VPC endpoints in every subnet it monitors. These endpoints block subnet deletion.
+
+**Fix:** Find and delete the GuardDuty-managed endpoints before retrying:
+
+```bash
+# Find GuardDuty endpoints in the stack's VPC
+VPC_ID=$(aws ec2 describe-vpcs \
+  --filters "Name=tag:aws:cloudformation:stack-name,Values=${STACK_NAME}" \
+  --region $REGION --query 'Vpcs[0].VpcId' --output text)
+
+ENDPOINTS=$(aws ec2 describe-vpc-endpoints \
+  --filters "Name=vpc-id,Values=$VPC_ID" \
+  --region $REGION \
+  --query 'VpcEndpoints[?State!=`deleted`].VpcEndpointId' --output text)
+
+aws ec2 delete-vpc-endpoints --vpc-endpoint-ids $ENDPOINTS --region $REGION
+
+# Retry stack deletion
+aws cloudformation delete-stack --stack-name $STACK_NAME --region $REGION
+```
+
+> **Note:** This does not disable GuardDuty — it only removes the endpoint ENIs that were blocking deletion. GuardDuty will recreate them in any new subnets automatically.
+
+> **Prevention:** Deploying with `CreateVPCEndpoints=false` (default) avoids creating a PrivateSubnet, which is the only subnet GuardDuty consistently attaches to in this template. The CloudFormation template has been updated to skip PrivateSubnet creation when VPC endpoints are disabled.
+
+### `deploy.sh` fails: ECR repo is empty after `--skip-build`
+
+**Symptom:** AgentCore runtime creation fails with "specified image identifier does not exist."
+
+**Cause:** `--skip-build` skips the Docker build, but if this is the first deploy of a new stack, the ECR repo will be empty.
+
+**Fix:** Run without `--skip-build` on first deploy. The script builds on the gateway EC2 via SSM — no local Docker needed.
+
+### AgentCore returns HTTP 500 on every message
+
+**Cause:** Almost always a wrong `openclaw` npm package version inside the container.
+
+**Check:**
+```bash
+aws logs tail /aws/bedrock-agentcore/runtimes/<runtime-id>-DEFAULT --follow
+# Look for: "openclaw returned empty output"
+```
+
+**Fix:** Rebuild the Docker image. Both `agent-container/Dockerfile` and `exec-agent/Dockerfile` must install `openclaw@2026.3.24` exactly — do not upgrade.
 
 ---
 
