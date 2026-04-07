@@ -587,7 +587,7 @@ aws bedrock-agentcore-control update-agent-runtime \
   --region $REGION
 ```
 
-> The standard agent image (`openclaw-multitenancy-multitenancy-agent`) is built automatically by `deploy-multitenancy.sh`. You only need this step for the executive tier.
+> The standard agent image (`openclaw-multitenancy-multitenancy-agent`) is built automatically by `deploy.sh`. You only need this step for the executive tier.
 
 ### Step 2: DynamoDB Table
 
