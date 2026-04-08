@@ -49,13 +49,12 @@ pip3 install --break-system-packages --upgrade boto3 botocore 2>/dev/null || tru
 
 echo ">>> Phase 2: Building admin console frontend..."
 
-export HOME=/home/ubuntu
-. /home/ubuntu/.nvm/nvm.sh
-
-cd enterprise/admin-console
-npm install --no-audit --no-fund
-npx vite build
-cd -
+# Run npm as the ubuntu user — NVM is installed under /home/ubuntu and npm
+# writes cache/config to $HOME. Running as root would pollute /root/.npm and
+# create root-owned files that the ubuntu user can't manage later.
+ADMIN_CONSOLE_DIR="$(pwd)/enterprise/admin-console"
+chown -R ubuntu:ubuntu "$ADMIN_CONSOLE_DIR"
+su - ubuntu -c "source /home/ubuntu/.nvm/nvm.sh && cd '$ADMIN_CONSOLE_DIR' && npm install --no-audit --no-fund && npx vite build"
 
 # ── Phase 3: Set up Python venv ──────────────────────────────────────────────
 

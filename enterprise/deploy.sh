@@ -445,19 +445,58 @@ aws ssm put-parameter \
   --region "$REGION" > /dev/null 2>&1
 success "  jwt-secret stored"
 
-# Write /etc/openclaw/env on EC2 (all config derived from CFN outputs)
-info "  Writing /etc/openclaw/env on EC2..."
-aws ssm send-command \
+# Write env file locally, upload to S3, then pull onto EC2 via SSM.
+# This avoids fragile JSON-in-JSON escaping — variable values with quotes,
+# dollars, or backslashes are written safely to a plain file.
+ENV_TMPFILE="/tmp/openclaw-env-$$"
+cat > "$ENV_TMPFILE" <<ENVEOF
+STACK_NAME=${STACK_NAME}
+AWS_REGION=${REGION}
+SSM_REGION=${REGION}
+GATEWAY_REGION=${REGION}
+S3_BUCKET=${S3_BUCKET}
+DYNAMODB_TABLE=${DYNAMODB_TABLE}
+DYNAMODB_REGION=${DYNAMODB_REGION}
+AGENTCORE_RUNTIME_ID=${RUNTIME_ID}
+BEDROCK_MODEL_ID=${MODEL}
+ECS_CLUSTER=${ECS_CLUSTER}
+ECS_TASK_DEF=${ECS_TASK_DEF}
+ECS_TASK_SG=${ECS_TASK_SG}
+ECS_SUBNET=${ECS_SUBNET}
+EFS_ID=${EFS_ID}
+ENVEOF
+aws s3 cp "$ENV_TMPFILE" "s3://${S3_BUCKET}/_deploy/env" --region "$REGION" --quiet
+rm -f "$ENV_TMPFILE"
+success "  env file uploaded to S3"
+
+info "  Installing /etc/openclaw/env on EC2..."
+ENV_CMD_ID=$(aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
   --document-name "AWS-RunShellScript" \
   --region "$REGION" \
-  --parameters "{\"commands\":[
-    \"mkdir -p /etc/openclaw\",
-    \"printf '%s\\n' 'STACK_NAME=${STACK_NAME}' 'AWS_REGION=${REGION}' 'SSM_REGION=${REGION}' 'GATEWAY_REGION=${REGION}' 'S3_BUCKET=${S3_BUCKET}' 'DYNAMODB_TABLE=${DYNAMODB_TABLE}' 'DYNAMODB_REGION=${DYNAMODB_REGION}' 'AGENTCORE_RUNTIME_ID=${RUNTIME_ID}' 'BEDROCK_MODEL_ID=${MODEL}' 'ECS_CLUSTER=${ECS_CLUSTER}' 'ECS_TASK_DEF=${ECS_TASK_DEF}' 'ECS_TASK_SG=${ECS_TASK_SG}' 'ECS_SUBNET=${ECS_SUBNET}' 'EFS_ID=${EFS_ID}' > /etc/openclaw/env\",
-    \"echo ENV_WRITTEN\"
-  ]}" \
-  --output text --query 'Command.CommandId' > /dev/null 2>&1 || warn "  env file write via SSM failed"
-success "  /etc/openclaw/env written"
+  --parameters 'commands=["mkdir -p /etc/openclaw","aws s3 cp s3://'"${S3_BUCKET}"'/_deploy/env /etc/openclaw/env --region '"${REGION}"'","echo ENV_WRITTEN"]' \
+  --query 'Command.CommandId' --output text)
+
+# Wait for env file write to complete (Step 8 depends on it)
+info "  Waiting for env file installation..."
+for i in $(seq 1 20); do
+  sleep 5
+  ENV_STATUS=$(aws ssm get-command-invocation \
+    --command-id "$ENV_CMD_ID" \
+    --instance-id "$INSTANCE_ID" \
+    --region "$REGION" \
+    --query 'Status' --output text 2>/dev/null || echo "Pending")
+  case "$ENV_STATUS" in
+    Success)
+      success "  /etc/openclaw/env written on EC2"
+      break ;;
+    Failed|Cancelled|TimedOut)
+      error "  env file installation failed ($ENV_STATUS)" ;;
+    *)
+      echo -n "." ;;
+  esac
+done
+[ "$ENV_STATUS" != "Success" ] && error "env file installation timed out"
 
 # ── Step 8: Deploy services to EC2 ──────────────────────────────────────────
 if [ "$SKIP_SERVICES" = "true" ]; then
