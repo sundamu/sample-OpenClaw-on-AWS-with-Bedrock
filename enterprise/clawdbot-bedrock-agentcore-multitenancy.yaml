@@ -1163,7 +1163,7 @@ Resources:
       Volumes:
         - Name: always-on-workspace
           EFSVolumeConfiguration:
-            FilesystemId: !Ref AlwaysOnEFS
+            FileSystemId: !Ref AlwaysOnEFS
             RootDirectory: /
             TransitEncryption: ENABLED
             AuthorizationConfig:
