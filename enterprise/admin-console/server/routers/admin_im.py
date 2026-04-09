@@ -28,28 +28,17 @@ def _mapping_prefix():
 
 
 def _run_openclaw_channels() -> list:
-    """Get live channel status from openclaw channels list CLI."""
+    """Get live channel status from openclaw channels list CLI.
+
+    Uses text format (primary) because it includes per-channel
+    'configured' / 'not configured' status that the JSON format lacks.
+    """
+    import re
     import subprocess as _sp
-    from routers.openclaw_cli import find_openclaw_bin, openclaw_env_path, parse_openclaw_json
+    from routers.openclaw_cli import find_openclaw_bin, openclaw_env_path
     openclaw_bin = find_openclaw_bin()
     env_path = openclaw_env_path()
-    try:
-        result = _sp.run(
-            ["sudo", "-u", "ubuntu", "env", f"PATH={env_path}", "HOME=/home/ubuntu",
-             openclaw_bin, "channels", "list", "--json"],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.stdout:
-            raw = parse_openclaw_json(result.stdout)
-            if raw:
-                channels = []
-                for ch_type, accounts in raw.get("chat", {}).items():
-                    for account in accounts:
-                        channels.append({"channel": ch_type, "account": account, "type": "chat"})
-                return channels
-    except Exception:
-        pass
-    # Fallback: parse openclaw channels list text output
+    _ansi_re = re.compile(r'\x1b\[[0-9;]*m')
     try:
         result = _sp.run(
             ["sudo", "-u", "ubuntu", "env", f"PATH={env_path}", "HOME=/home/ubuntu",
@@ -58,22 +47,27 @@ def _run_openclaw_channels() -> list:
         )
         channels = []
         for line in result.stdout.splitlines():
-            line = line.strip()
-            if line.startswith("- ") and "default" in line:
-                parts = line[2:].split()
-                ch_type = parts[0].lower() if parts else "unknown"
-                configured = "configured" in line
-                linked = "not linked" not in line
-                channels.append({
-                    "channel": ch_type,
-                    "account": "default",
-                    "configured": configured,
-                    "linked": linked,
-                    "raw": line,
-                })
-        return channels
+            line = _ansi_re.sub('', line).strip()
+            if not line.startswith("- "):
+                continue
+            # Example lines:
+            #   - Telegram default: not configured, token=none, enabled
+            #   - Feishu default: configured, enabled
+            parts = line[2:].split()
+            ch_type = parts[0].lower() if parts else "unknown"
+            configured = "not configured" not in line and "configured" in line
+            linked = "not linked" not in line
+            channels.append({
+                "channel": ch_type,
+                "account": "default",
+                "configured": configured,
+                "linked": linked,
+            })
+        if channels:
+            return channels
     except Exception:
-        return []
+        pass
+    return []
 
 
 def _list_user_mappings() -> list:
@@ -214,16 +208,12 @@ def get_im_channels(authorization: str = Header(default="")):
         gw = gw_by_channel.get(ch["id"], {})
         configured = bool(gw) and gw.get("configured", False)
         linked = bool(gw) and gw.get("linked", False)
-        if gw and "raw" not in gw:
-            configured = True
-            linked = True
         status = "connected" if (configured and linked) else \
                  "configured" if configured else "not_connected"
         result.append({
             **ch,
             "status": status,
             "connectedEmployees": channel_counts.get(ch["id"], 0),
-            "gatewayInfo": gw.get("raw", "") if gw else "",
         })
     return result
 
@@ -260,29 +250,21 @@ def test_im_channel(channel: str, authorization: str = Header(default="")):
     Returns {ok, botName, error}."""
     require_role(authorization, roles=["admin"])
     try:
-        import subprocess as _sp
-        from routers.openclaw_cli import find_openclaw_bin, openclaw_env_path, parse_openclaw_json
-        openclaw_bin = find_openclaw_bin()
-        env_path = openclaw_env_path()
-        result = _sp.run(
-            ["sudo", "-u", "ubuntu", "env", f"PATH={env_path}", "HOME=/home/ubuntu",
-             openclaw_bin, "channels", "list", "--json"],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.stdout:
-            raw = parse_openclaw_json(result.stdout)
-            if not raw:
-                return {"ok": False, "error": "Unexpected openclaw output — no JSON found."}
-            configured = raw.get("chat", {})
-            # channel name in openclaw may differ: "feishu" -> "feishu", "discord" -> "discord"
-            channel_key = channel.lower()
-            if channel_key in configured and configured[channel_key]:
-                accounts = configured[channel_key]
-                return {"ok": True, "botName": f"{channel} ({', '.join(accounts)})"}
-            return {
-                "ok": False,
-                "error": f"{channel.capitalize()} bot not configured in OpenClaw. Open Gateway UI (port 18789) → Channels → Add {channel.capitalize()}.",
-            }
-        return {"ok": False, "error": "Could not reach OpenClaw CLI. Ensure openclaw gateway is running."}
+        channels = _run_openclaw_channels()
+        if not channels:
+            return {"ok": False, "error": "Could not reach OpenClaw CLI. Ensure openclaw gateway is running."}
+        channel_key = channel.lower()
+        for ch in channels:
+            if ch.get("channel") == channel_key:
+                if ch.get("configured"):
+                    return {"ok": True, "botName": f"{channel} ({ch.get('account', 'default')})"}
+                return {
+                    "ok": False,
+                    "error": f"{channel.capitalize()} bot not configured in OpenClaw. Open Gateway UI (port 18789) → Channels → Add {channel.capitalize()}.",
+                }
+        return {
+            "ok": False,
+            "error": f"{channel.capitalize()} plugin not enabled. Enable it in openclaw.json plugins → entries.",
+        }
     except Exception as e:
         return {"ok": False, "error": str(e)}

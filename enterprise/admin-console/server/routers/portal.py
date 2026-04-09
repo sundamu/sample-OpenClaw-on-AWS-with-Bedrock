@@ -189,6 +189,8 @@ def portal_im_channel_status(authorization: str = Header(default="")):
     channels = _run_openclaw_channels()
     configured = set()
     for ch in channels:
+        if not ch.get("configured"):
+            continue
         name = (ch.get("channel") or ch.get("id", "")).lower()
         if name:
             configured.add(name)
