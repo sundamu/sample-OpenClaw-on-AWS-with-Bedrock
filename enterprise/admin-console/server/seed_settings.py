@@ -61,6 +61,38 @@ def seed(table_name: str, region: str):
         "employeeKBs": {},
     })
 
+    # IM bot info — admin configures actual values via Admin Console after
+    # setting up bots in the Gateway UI.  Deep link templates are fixed per
+    # platform; only the bot-specific fields (appId, username) need filling in.
+    items.append({"PK": ORG, "SK": "CONFIG#im-bot-info", "GSI1PK": "TYPE#config", "GSI1SK": "CONFIG#im-bot-info",
+        "channels": {
+            "telegram": {
+                "label": "Telegram",
+                "botUsername": "",
+                "deepLinkTemplate": "https://t.me/{bot}?start={token}",
+            },
+            "discord": {
+                "label": "Discord",
+                "botUsername": "",
+                "instructions": "Open Discord → company server → DM the bot → send the command",
+            },
+            "feishu": {
+                "label": "Feishu / Lark",
+                "botUsername": "",
+                "feishuAppId": "",
+                "deepLinkTemplate": "https://applink.feishu.cn/client/bot/open?appId={appId}",
+            },
+            "slack": {
+                "label": "Slack",
+                "botUsername": "",
+            },
+            "whatsapp": {
+                "label": "WhatsApp",
+                "botUsername": "",
+            },
+        },
+    })
+
     print(f"Writing {len(items)} config items...")
     with table.batch_writer() as batch:
         for item in items:

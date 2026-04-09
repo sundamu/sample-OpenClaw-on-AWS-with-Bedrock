@@ -27,33 +27,48 @@ router = APIRouter(tags=["portal"])
 #       -> H2 Proxy calls pair-complete -> SSM mapping written -> done
 # =========================================================================
 
-# Channel -> bot info map (used to build deep links shown to employees)
-_CHANNEL_BOT_INFO = {
-    "telegram": {
-        "botUsername": os.environ.get("TELEGRAM_BOT_USERNAME", "acme_enterprise_bot"),
-        "deepLinkTemplate": "https://t.me/{bot}?start={token}",
-        "label": "Telegram",
-    },
-    "discord": {
-        "botUsername": "ACME Agent",
-        "deepLinkTemplate": None,
-        "label": "Discord",
-        "instructions": "Open Discord -> ACME Corp server -> DM ACME Agent -> send the command",
-    },
-    "feishu": {
-        "botUsername": os.environ.get("FEISHU_BOT_NAME", "ACME Agent"),
-        # Feishu deep link opens the bot chat directly (doesn't support token param)
-        # User scans QR -> bot chat opens -> then manually sends /start TOKEN
-        "deepLinkTemplate": "https://applink.feishu.cn/client/bot/open?appId={appId}",
-        "feishuAppId": os.environ.get("FEISHU_APP_ID", "cli_a94cb611da399cdd"),
-        "label": "Feishu / Lark",
-    },
-    "slack": {
-        "botUsername": os.environ.get("SLACK_BOT_USERNAME", "acme-agent"),
-        "deepLinkTemplate": None,
-        "label": "Slack",
-    },
+# Deep link templates per platform (fixed, not configurable)
+_DEEP_LINK_TEMPLATES = {
+    "telegram": "https://t.me/{bot}?start={token}",
+    "feishu": "https://applink.feishu.cn/client/bot/open?appId={appId}",
 }
+
+
+def _get_channel_bot_info(channel: str) -> dict:
+    """Read bot info for a channel.
+
+    Primary source: Gateway's openclaw.json (channels section) — this is where
+    admin configures bot credentials via the Gateway UI.  Falls back to
+    DynamoDB CONFIG#im-bot-info for any admin-provided overrides.
+    """
+    info = {}
+
+    # 1. Read from Gateway's openclaw.json (authoritative source)
+    try:
+        gw_config = json.load(open("/home/ubuntu/.openclaw/openclaw.json"))
+        ch_cfg = gw_config.get("channels", {}).get(channel, {})
+        if ch_cfg:
+            info["botUsername"] = ch_cfg.get("botUsername", "")
+            if channel == "feishu" and ch_cfg.get("appId"):
+                info["feishuAppId"] = ch_cfg["appId"]
+            if channel == "telegram" and ch_cfg.get("botUsername"):
+                info["botUsername"] = ch_cfg["botUsername"]
+    except Exception:
+        pass
+
+    # 2. Overlay any admin overrides from DynamoDB
+    db_config = db.get_config("im-bot-info")
+    if db_config:
+        db_channel = db_config.get("channels", {}).get(channel, {})
+        for k, v in db_channel.items():
+            if v:  # only override if non-empty
+                info[k] = v
+
+    # 3. Add deep link template
+    if channel in _DEEP_LINK_TEMPLATES:
+        info.setdefault("deepLinkTemplate", _DEEP_LINK_TEMPLATES[channel])
+
+    return info
 
 
 class PairStartRequest(BaseModel):
@@ -160,7 +175,7 @@ def pair_start(body: PairStartRequest, authorization: str = Header(default="")):
 
     db.create_pair_token(token, user.employee_id, body.channel)
 
-    bot_info = _CHANNEL_BOT_INFO.get(body.channel, {})
+    bot_info = _get_channel_bot_info(body.channel)
     bot_username = bot_info.get("botUsername", "")
     template = bot_info.get("deepLinkTemplate")
     # Feishu uses appId in the deep link, not bot username or token

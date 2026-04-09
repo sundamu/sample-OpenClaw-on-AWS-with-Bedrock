@@ -268,3 +268,31 @@ def test_im_channel(channel: str, authorization: str = Header(default="")):
         }
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# ── IM Bot Info Configuration ────────────────────────────────────────────
+
+@router.get("/api/v1/admin/im-bot-info")
+def get_im_bot_info(authorization: str = Header(default="")):
+    """Return IM bot info config (appIds, bot usernames, deep link templates).
+    Used by Portal pairing flow to generate correct deep links / QR codes."""
+    require_role(authorization, roles=["admin", "manager"])
+    config = db.get_config("im-bot-info")
+    if not config:
+        return {"channels": {}}
+    return {"channels": config.get("channels", {})}
+
+
+@router.put("/api/v1/admin/im-bot-info/{channel}")
+def set_im_bot_info(channel: str, body: dict, authorization: str = Header(default="")):
+    """Update bot info for a specific IM channel (feishuAppId, botUsername, etc.)."""
+    require_role(authorization, roles=["admin"])
+    config = db.get_config("im-bot-info") or {"channels": {}}
+    channels = config.get("channels", {})
+    # Merge incoming fields into existing channel config
+    existing = channels.get(channel, {})
+    existing.update(body)
+    channels[channel] = existing
+    config["channels"] = channels
+    db.set_config("im-bot-info", config)
+    return {"ok": True, "channel": channel, "config": existing}

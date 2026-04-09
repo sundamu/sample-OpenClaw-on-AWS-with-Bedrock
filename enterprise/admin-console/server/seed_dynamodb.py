@@ -63,7 +63,7 @@ def seed(table_name: str, region: str):
         # Engineering — Software Engineers
         ("emp-ryan",   "Ryan Park",     "EMP-004", "pos-sde",   "Software Engineer",           "dept-eng-backend",  "Backend Team",      ["slack","discord"],   "agent-sde-ryan",   "active"),
         ("emp-sophie", "Sophie Turner", "EMP-005", "pos-sde",   "Software Engineer",           "dept-eng-backend",  "Backend Team",      ["slack"],             "agent-sde-sophie", "active"),
-        ("emp-nathan", "Nathan Brooks", "EMP-006", "pos-sde",   "Software Engineer",           "dept-eng-frontend", "Frontend Team",     ["slack"],             None,               "idle"),
+        ("emp-nathan", "Nathan Brooks", "EMP-006", "pos-sde",   "Software Engineer",           "dept-eng-frontend", "Frontend Team",     ["slack"],             "agent-sde-nathan", "active"),
         # Engineering — DevOps & QA
         ("emp-chris",  "Chris Morgan",  "EMP-007", "pos-devops","DevOps Engineer",             "dept-eng-platform", "Platform Team",     ["slack","telegram"],  "agent-devops-chris","active"),
         ("emp-lisa",   "Lisa Chen",     "EMP-008", "pos-devops","DevOps Engineer",             "dept-eng-platform", "Platform Team",     ["slack"],             "agent-devops-lisa", "active"),
@@ -71,7 +71,7 @@ def seed(table_name: str, region: str):
         # Sales
         ("emp-mike",   "Mike Johnson",  "EMP-011", "pos-ae",    "Account Executive",           "dept-sales-ent",    "Enterprise Sales",  ["whatsapp","slack"],  "agent-ae-mike",    "active"),
         ("emp-sarah",  "Sarah Kim",     "EMP-012", "pos-ae",    "Account Executive",           "dept-sales-ent",    "Enterprise Sales",  ["whatsapp"],          "agent-ae-sarah",   "active"),
-        ("emp-tom",    "Tom Wilson",    "EMP-013", "pos-ae",    "Account Executive",           "dept-sales-smb",    "SMB Sales",         ["slack"],             None,               "idle"),
+        ("emp-tom",    "Tom Wilson",    "EMP-013", "pos-ae",    "Account Executive",           "dept-sales-smb",    "SMB Sales",         ["slack"],             "agent-ae-tom",     "active"),
         # Product
         ("emp-alex",   "Alex Rivera",   "EMP-015", "pos-pm",    "Product Manager",             "dept-product",      "Product",           ["slack"],             "agent-pm-alex",    "active"),
         ("emp-priya",  "Priya Patel",   "EMP-014", "pos-pm",    "Product Manager",             "dept-product",      "Product",           ["slack","discord"],   "agent-pm-priya",   "active"),
@@ -122,9 +122,9 @@ def seed(table_name: str, region: str):
         ("agent-legal-rachel","Legal Agent - Rachel","emp-rachel","Rachel Li",    "pos-legal", "Legal Counsel",               "active", 4.8, ["jina-reader","deep-research"], ["slack"]),
         # Executive
         ("agent-exec-peter", "Executive Agent - Peter","emp-peter","Peter Wu",   "pos-exec",  "Executive",                   "active", None, ["jina-reader","deep-research","web_search"], ["discord"]),
-        # Shared agents
-        ("agent-helpdesk",   "IT Help Desk Agent", None,          "(Shared)",     "pos-devops","DevOps Engineer",             "active", 4.0, ["jina-reader","web-search","jira-query"], ["discord","slack"]),
-        ("agent-onboarding", "Onboarding Assistant",None,         "(Shared)",     "pos-hr",    "HR Specialist",               "active", 4.3, ["jina-reader","web-search"], ["slack"]),
+        # Previously idle employees — now auto-provisioned
+        ("agent-sde-nathan", "SDE Agent - Nathan", "emp-nathan", "Nathan Brooks", "pos-sde",   "Software Engineer",           "active", None, ["jina-reader","deep-research","github-pr"], ["slack"]),
+        ("agent-ae-tom",     "Sales Agent - Tom",  "emp-tom",    "Tom Wilson",    "pos-ae",    "Account Executive",           "active", None, ["jina-reader","web-search","crm-query"], ["slack"]),
     ]
     for aid, name, eid, ename, pid, pname, status, qs, skills, chs in agents:
         item = {"PK": ORG, "SK": f"AGENT#{aid}", "GSI1PK": "TYPE#agent", "GSI1SK": f"AGENT#{aid}",
@@ -137,20 +137,17 @@ def seed(table_name: str, region: str):
         items.append(item)
 
     # --- Bindings ---
-    bindings = [
-        ("bind-jiade-dc",  "emp-jiade",  "JiaDe Wang",   "agent-sa-jiade",    "SA Agent - JiaDe",    "1:1", "discord",  "bound"),
-        ("bind-jiade-sl",  "emp-jiade",  "JiaDe Wang",   "agent-sa-jiade",    "SA Agent - JiaDe",    "1:1", "slack",    "bound"),
-        ("bind-marcus-sl", "emp-marcus", "Marcus Bell",  "agent-sa-marcus",   "SA Agent - Marcus",   "1:1", "slack",    "bound"),
-        ("bind-marcus-tg", "emp-marcus", "Marcus Bell",  "agent-sa-marcus",   "SA Agent - Marcus",   "1:1", "telegram", "pending"),
-        ("bind-ryan-dc",   "emp-ryan",   "Ryan Park",    "agent-sde-ryan",    "SDE Agent - Ryan",    "1:1", "discord",  "bound"),
-        ("bind-chris-sl",  "emp-chris",  "Chris Morgan", "agent-devops-chris","DevOps Agent - Chris","1:1", "slack",    "bound"),
-        ("bind-mike-wa",   "emp-mike",   "Mike Johnson", "agent-ae-mike",     "Sales Agent - Mike",  "1:1", "whatsapp", "bound"),
-        ("bind-carol-sl",  "emp-carol",  "Carol Zhang",  "agent-fa-carol",    "Finance Agent - Carol","1:1","slack",    "bound"),
-        ("bind-carol-tg",  "emp-carol",  "Carol Zhang",  "agent-fa-carol",    "Finance Agent - Carol","1:1","telegram", "bound"),
-        ("bind-peter-dc",  "emp-peter",  "Peter Wu",     "agent-exec-peter",  "Executive Agent - Peter","1:1","discord","bound"),
-        ("bind-helpdesk-1","emp-jiade",  "JiaDe Wang",   "agent-helpdesk",    "IT Help Desk Agent",  "N:1", "discord",  "bound"),
-        ("bind-helpdesk-2","emp-ryan",   "Ryan Park",    "agent-helpdesk",    "IT Help Desk Agent",  "N:1", "discord",  "bound"),
-    ]
+    # Every employee automatically gets a 1:1 Serverless agent.
+    # Admin can upgrade to Always-on (Fargate) for scheduled tasks and instant response.
+    agent_name_map = {aid: aname for aid, aname, *_ in agents}
+    bindings = []
+    for eid, ename, _eno, _pid, _pname, _did, _dname, chs, aid, _ast in employees:
+        if not aid:
+            continue
+        primary_ch = chs[0] if chs else "serverless"
+        bid = f"bind-{eid.replace('emp-', '')}-auto"
+        aname = agent_name_map.get(aid, aid)
+        bindings.append((bid, eid, ename, aid, aname, "1:1", primary_ch, "bound"))
     for bid, eid, ename, aid, aname, mode, ch, st in bindings:
         items.append({"PK": ORG, "SK": f"BIND#{bid}", "GSI1PK": f"AGENT#{aid}", "GSI1SK": f"BIND#{bid}",
             "id": bid, "employeeId": eid, "employeeName": ename, "agentId": aid, "agentName": aname,
