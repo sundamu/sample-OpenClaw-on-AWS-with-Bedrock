@@ -158,51 +158,27 @@ function InterfaceTab() {
 
 // ─── Admin Assistant Tab ──────────────────────────────────────────────────────
 
-const ALL_COMMANDS = [
-  'list_employees', 'list_agents', 'get_agent', 'list_sessions', 'list_audit',
-  'list_approvals', 'approve_request', 'deny_request', 'get_service_status',
-  'get_model_config', 'update_model_config', 'list_user_mappings',
-  'get_system_stats', 'list_knowledge_bases',
-];
-
-const COMMAND_DESCRIPTIONS: Record<string, string> = {
-  list_employees: 'Query employee list and details',
-  list_agents: 'List all AI agents and their status',
-  get_agent: 'Get a specific agent\'s full configuration',
-  list_sessions: 'View active and recent agent sessions',
-  list_audit: 'Query audit log entries',
-  list_approvals: 'View pending approval requests',
-  approve_request: 'Approve a permission request',
-  deny_request: 'Deny a permission request',
-  get_service_status: 'Check health of platform services',
-  get_model_config: 'Read current model configuration',
-  update_model_config: 'Change the default model for agents',
-  list_user_mappings: 'View employee IM channel mappings',
-  get_system_stats: 'Read EC2 CPU / memory / disk stats',
-  list_knowledge_bases: 'List configured knowledge bases',
-};
-
 function AdminAssistantTab() {
   const { data: cfg } = useAdminAssistant();
   const update = useUpdateAdminAssistant();
   const { data: mc } = useModelConfig();
   const [model, setModel] = useState('');
-  const [commands, setCommands] = useState<string[]>([]);
-  const [extra, setExtra] = useState('');
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [maxHistory, setMaxHistory] = useState(20);
+  const [maxTokens, setMaxTokens] = useState(4096);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (cfg) {
       setModel(cfg.model || '');
-      setCommands(cfg.allowedCommands || []);
-      setExtra(cfg.systemPromptExtra || '');
+      setSystemPrompt(cfg.systemPrompt || '');
+      setMaxHistory(cfg.maxHistoryTurns || 20);
+      setMaxTokens(cfg.maxTokens || 4096);
     }
   }, [cfg]);
 
-  const toggleCmd = (c: string) => setCommands(s => s.includes(c) ? s.filter(x => x !== c) : [...s, c]);
-
   const handleSave = async () => {
-    await update.mutateAsync({ model, allowedCommands: commands, systemPromptExtra: extra });
+    await update.mutateAsync({ model, systemPrompt, maxHistoryTurns: maxHistory, maxTokens });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -219,46 +195,42 @@ function AdminAssistantTab() {
         </h3>
         <p className="text-xs text-text-muted mb-4">
           The model used by the floating chat assistant (bottom-right corner).
-          Choose a fast, cost-effective model for operational queries.
+          Uses Bedrock Converse with 10 whitelisted tools (agentic loop).
         </p>
         <Select label="Model" value={model} onChange={setModel}
           options={modelOptions} placeholder="Select model…" />
       </Card>
 
       <Card>
-        <h3 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
-          <MessageSquare size={16} className="text-primary" /> Allowed Tools / Commands
-        </h3>
-        <p className="text-xs text-text-muted mb-4">
-          Select which backend tools the Admin Assistant can call. Restrict to limit what the AI can read or change.
-        </p>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {ALL_COMMANDS.map(c => {
-            const on = commands.includes(c);
-            return (
-              <label key={c}
-                className={`flex items-start gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors ${on ? 'bg-primary/10 border border-primary/30' : 'bg-surface-dim border border-transparent hover:border-dark-border/50'}`}>
-                <input type="checkbox" checked={on} onChange={() => toggleCmd(c)} className="accent-primary mt-0.5" />
-                <div>
-                  <p className="text-xs font-medium text-text-primary">{c}</p>
-                  <p className="text-[10px] text-text-muted">{COMMAND_DESCRIPTIONS[c] || ''}</p>
-                </div>
-              </label>
-            );
-          })}
-        </div>
+        <h3 className="text-sm font-semibold text-text-primary mb-3">System Prompt</h3>
+        <p className="text-xs text-text-muted mb-3">Custom system prompt for the Admin Assistant. Leave empty to use the default.</p>
+        <textarea
+          value={systemPrompt}
+          onChange={e => setSystemPrompt(e.target.value)}
+          rows={4}
+          placeholder="e.g. Always respond in English. Focus on operational queries about employees and agents."
+          className="w-full rounded-xl border border-dark-border/60 bg-surface-dim px-4 py-3 text-sm text-text-primary placeholder:text-text-muted focus:border-primary/60 focus:outline-none resize-y"
+        />
       </Card>
 
       <Card>
-        <h3 className="text-sm font-semibold text-text-primary mb-3">Extra System Prompt</h3>
-        <p className="text-xs text-text-muted mb-3">Append additional instructions to the Admin Assistant's system prompt.</p>
-        <textarea
-          value={extra}
-          onChange={e => setExtra(e.target.value)}
-          rows={4}
-          placeholder="e.g. Always respond in English. Never suggest deleting data without explicit confirmation."
-          className="w-full rounded-xl border border-dark-border/60 bg-surface-dim px-4 py-3 text-sm text-text-primary placeholder:text-text-muted focus:border-primary/60 focus:outline-none resize-y"
-        />
+        <h3 className="text-sm font-semibold text-text-primary mb-3">Conversation Settings</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs text-text-muted block mb-1">Max History Turns</label>
+            <input type="number" value={maxHistory} onChange={e => setMaxHistory(Number(e.target.value))}
+              min={1} max={50}
+              className="w-full rounded-lg border border-dark-border/60 bg-surface-dim px-3 py-2 text-sm text-text-primary focus:border-primary/60 focus:outline-none" />
+            <p className="text-[10px] text-text-muted mt-1">Number of conversation turns kept in context</p>
+          </div>
+          <div>
+            <label className="text-xs text-text-muted block mb-1">Max Tokens</label>
+            <input type="number" value={maxTokens} onChange={e => setMaxTokens(Number(e.target.value))}
+              min={256} max={8192} step={256}
+              className="w-full rounded-lg border border-dark-border/60 bg-surface-dim px-3 py-2 text-sm text-text-primary focus:border-primary/60 focus:outline-none" />
+            <p className="text-[10px] text-text-muted mt-1">Max response tokens per turn</p>
+          </div>
+        </div>
       </Card>
 
       <Button variant="primary" onClick={handleSave} disabled={update.isPending}>

@@ -230,8 +230,32 @@ export interface RuntimeEvent {
 export function useRuntimeEvents(minutes: number = 30) {
   return useQuery<{ events: RuntimeEvent[]; summary: Record<string, number> }>({
     queryKey: ['runtime-events', minutes],
-    queryFn: () => api.get(`/monitor/runtime-events?minutes=${minutes}`),
+    queryFn: () => api.get(`/monitor/events?minutes=${minutes}`),
     refetchInterval: 15_000,
+  });
+}
+
+export function useMonitorActionItems() {
+  return useQuery<{ items: any[] }>({
+    queryKey: ['monitor-action-items'],
+    queryFn: () => api.get('/monitor/action-items'),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useMonitorSystemStatus() {
+  return useQuery<{ agents: any; sessions: any; system: any }>({
+    queryKey: ['monitor-system-status'],
+    queryFn: () => api.get('/monitor/system-status'),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useMonitorAgentActivity() {
+  return useQuery<{ agents: any[] }>({
+    queryKey: ['monitor-agent-activity'],
+    queryFn: () => api.get('/monitor/agent-activity'),
+    refetchInterval: 30_000,
   });
 }
 
@@ -265,6 +289,26 @@ export function useRunAuditScan() {
   return useMutation({
     mutationFn: () => api.post('/audit/run-scan', {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['audit-insights'] }),
+  });
+}
+
+export function useAuditReviews() {
+  return useQuery<{ reviews: any[] }>({
+    queryKey: ['audit-reviews'],
+    queryFn: () => api.get('/audit/reviews'),
+  });
+}
+
+export function useAuditCompliance() {
+  return useQuery<any>({
+    queryKey: ['audit-compliance'],
+    queryFn: () => api.get('/audit/compliance'),
+  });
+}
+
+export function useAuditAnalyze() {
+  return useMutation<any, Error, { entryId: string }>({
+    mutationFn: (body) => api.post('/audit/analyze', body),
   });
 }
 
@@ -604,6 +648,23 @@ export function usePlaygroundProfiles() {
   });
 }
 
+export function usePlaygroundPipeline(empId: string) {
+  return useQuery<any>({
+    queryKey: ['playground-pipeline', empId],
+    queryFn: () => api.get(`/playground/pipeline/${empId}`),
+    enabled: !!empId,
+  });
+}
+
+export function usePlaygroundEvents(tenantId: string, seconds: number = 60) {
+  return useQuery<{ events: any[]; count: number }>({
+    queryKey: ['playground-events', tenantId, seconds],
+    queryFn: () => api.get(`/playground/events?tenant_id=${tenantId}&seconds=${seconds}`),
+    enabled: !!tenantId,
+    refetchInterval: 5_000,
+  });
+}
+
 export function usePlaygroundSend() {
   return useMutation({
     mutationFn: (data: { tenant_id: string; message: string; mode?: string }) =>
@@ -780,7 +841,7 @@ export function useChangeAdminPassword() {
 }
 
 export function useAdminAssistant() {
-  return useQuery<{ model: string; allowedCommands: string[]; systemPromptExtra: string }>({
+  return useQuery<{ model: string; systemPrompt: string; maxHistoryTurns: number; maxTokens: number }>({
     queryKey: ['admin-assistant-config'],
     queryFn: () => api.get('/settings/admin-assistant'),
   });
@@ -789,9 +850,49 @@ export function useAdminAssistant() {
 export function useUpdateAdminAssistant() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { model: string; allowedCommands: string[]; systemPromptExtra: string }) =>
+    mutationFn: (data: { model?: string; systemPrompt?: string; maxHistoryTurns?: number; maxTokens?: number }) =>
       api.put('/settings/admin-assistant', data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-assistant-config'] }),
+  });
+}
+
+export function usePlatformAccess() {
+  return useQuery<{ ssmCommand: string; instanceId: string; region: string; portForwardCommand: string }>({
+    queryKey: ['platform-access'],
+    queryFn: () => api.get('/settings/platform-access'),
+  });
+}
+
+export function usePlatformLogs(service?: string, lines?: number) {
+  const qs = new URLSearchParams();
+  if (service) qs.set('service', service);
+  if (lines) qs.set('lines', String(lines));
+  return useQuery<{ logs: string; service: string; lines: number }>({
+    queryKey: ['platform-logs', service, lines],
+    queryFn: () => api.get(`/settings/platform-logs?${qs}`),
+    enabled: false,
+  });
+}
+
+export function useAdminHistory() {
+  return useQuery<{ history: any[] }>({
+    queryKey: ['admin-history'],
+    queryFn: () => api.get('/settings/admin-assistant/history'),
+  });
+}
+
+export function useIMChannelHealth() {
+  return useQuery<{ lastActivity: Record<string, string>; messagesLast24h: Record<string, number> }>({
+    queryKey: ['im-channel-health'],
+    queryFn: () => api.get('/admin/im-channels/health'),
+    refetchInterval: 60_000,
+  });
+}
+
+export function useIMEnrollment() {
+  return useQuery<{ totalWithAgent: number; bound: number; unbound: number; unboundEmployees: any[]; multiChannel: any[] }>({
+    queryKey: ['im-enrollment'],
+    queryFn: () => api.get('/admin/im-channels/enrollment'),
   });
 }
 
