@@ -28,6 +28,17 @@ No API key found for amazon-bedrock.
 
 ---
 
+## Prerequisites
+
+Set these variables to match your deployment before running any commands below:
+
+```bash
+STACK_NAME="openclaw-bedrock"   # ← your CloudFormation stack name
+REGION="us-west-2"              # ← your deployment region
+```
+
+---
+
 ## Option 1: In-Place Upgrade (Recommended)
 
 Preserves all your data:
@@ -36,24 +47,25 @@ Preserves all your data:
 - SOUL.md customizations, installed skills, cron jobs
 - Gateway token (no re-authentication needed)
 
-### Prerequisites
+### Connect to the instance
 
 ```bash
 INSTANCE_ID=$(aws cloudformation describe-stacks \
-  --stack-name openclaw-bedrock \
+  --stack-name $STACK_NAME \
   --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' \
-  --output text --region us-west-2)
+  --output text --region $REGION)
 
-aws ssm start-session --target $INSTANCE_ID --region us-west-2
+aws ssm start-session --target $INSTANCE_ID --region $REGION
 sudo su - ubuntu
 ```
 
 ### Step 1: Back up
 
 ```bash
+openclaw --version   # Confirm current version before upgrading
 cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak
 cp ~/.openclaw/.env ~/.openclaw/.env.bak 2>/dev/null || true
-openclaw --version
+ls -la ~/.openclaw/*.bak
 ```
 
 ### Step 2: Install v2026.4.5
@@ -85,8 +97,21 @@ printf 'AWS_REGION=%s\nAWS_DEFAULT_REGION=%s\nAWS_PROFILE=default\n' "$REGION" "
 **Option A — Modern plugin-based config (recommended):**
 
 ```bash
-TOKEN=$(python3 -c "import json; print(json.load(open('$HOME/.openclaw/openclaw.json'))['gateway']['auth']['token'])")
-MODEL=$(python3 -c "import json; print(json.load(open('$HOME/.openclaw/openclaw.json'))['agents']['defaults']['model']['primary'].split('/')[-1])")
+TOKEN=$(python3 << 'PYEOF'
+import json, os
+with open(os.path.expanduser('~/.openclaw/openclaw.json')) as f:
+    cfg = json.load(f)
+print(cfg['gateway']['auth']['token'])
+PYEOF
+)
+
+MODEL=$(python3 << 'PYEOF'
+import json, os
+with open(os.path.expanduser('~/.openclaw/openclaw.json')) as f:
+    cfg = json.load(f)
+print(cfg['agents']['defaults']['model']['primary'].split('/')[-1])
+PYEOF
+)
 
 cat > ~/.openclaw/openclaw.json << EOF
 {
@@ -115,19 +140,27 @@ EOF
 **Option B — Keep legacy config with minimal changes:**
 
 ```bash
-python3 -c "
-import json
-cfg_path = '$HOME/.openclaw/openclaw.json'
+python3 << 'PYEOF'
+import json, os, sys
+
+cfg_path = os.path.expanduser('~/.openclaw/openclaw.json')
 with open(cfg_path) as f:
     cfg = json.load(f)
+
 provider = cfg['models']['providers']['amazon-bedrock']
 provider.pop('auth', None)
-assert 'api' in provider, 'api field required — add: \"api\": \"bedrock-converse-stream\"'
-assert 'baseUrl' in provider, 'baseUrl field required'
+
+if 'api' not in provider:
+    print('ERROR: api field required — add: "api": "bedrock-converse-stream"')
+    sys.exit(1)
+if 'baseUrl' not in provider:
+    print('ERROR: baseUrl field required')
+    sys.exit(1)
+
 with open(cfg_path, 'w') as f:
     json.dump(cfg, f, indent=2)
 print('Config updated')
-"
+PYEOF
 ```
 
 > **Important**: With Option B, the `api` field (`"bedrock-converse-stream"`) must remain. Without it, v2026.4.5 defaults to raw HTTP calls, causing "LLM request timed out" errors.
@@ -157,9 +190,6 @@ journalctl --user -u openclaw-gateway.service -n 50 --no-pager
 ### Step 1: Delete existing stack
 
 ```bash
-STACK_NAME="openclaw-bedrock"
-REGION="us-west-2"
-
 aws cloudformation delete-stack --stack-name $STACK_NAME --region $REGION
 aws cloudformation wait stack-delete-complete --stack-name $STACK_NAME --region $REGION
 ```
@@ -226,11 +256,17 @@ systemctl --user restart openclaw-gateway.service
 
 Legacy config missing `api` field:
 ```bash
-python3 -c "
-import json; cfg_path = '$HOME/.openclaw/openclaw.json'
-cfg = json.load(open(cfg_path))
+python3 << 'PYEOF'
+import json, os
+
+cfg_path = os.path.expanduser('~/.openclaw/openclaw.json')
+with open(cfg_path) as f:
+    cfg = json.load(f)
 cfg['models']['providers']['amazon-bedrock']['api'] = 'bedrock-converse-stream'
-json.dump(cfg, open(cfg_path, 'w'), indent=2); print('Fixed')"
+with open(cfg_path, 'w') as f:
+    json.dump(cfg, f, indent=2)
+print('Fixed')
+PYEOF
 systemctl --user restart openclaw-gateway.service
 ```
 
