@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from permissions import read_permission_profile
@@ -1226,7 +1227,9 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
 
 def main():
     port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(("0.0.0.0", port), AgentCoreHandler)
+    class ThreadedServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+    server = ThreadedServer(("0.0.0.0", port), AgentCoreHandler)
     logger.info("HTTP server listening on port %d", port)
     logger.info("openclaw binary: %s", OPENCLAW_BIN)
     try:

@@ -36,7 +36,7 @@ const ADMIN_NAV: NavItem[] = [
   },
   { label: 'Agent Factory', href: '/agents', icon: <Bot size={20} /> },
   { label: 'Workspace', href: '/workspace', icon: <FolderOpen size={20} /> },
-  { label: 'Skill Market', href: '/skills', icon: <Puzzle size={20} /> },
+  { label: 'Tools & Skills', href: '/skills', icon: <Puzzle size={20} /> },
   { label: 'Knowledge Base', href: '/knowledge', icon: <BookOpen size={20} /> },
   { label: 'IM Channels', href: '/channels', icon: <MessageSquare size={20} /> },
   { label: 'Security Center', href: '/security', icon: <ShieldCheck size={20} /> },

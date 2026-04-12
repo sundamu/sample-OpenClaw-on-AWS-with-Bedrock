@@ -67,9 +67,20 @@ def _get_item(sk: str) -> Optional[dict]:
         return None
 
 
+def _sanitize_floats(obj):
+    """Convert Python floats to Decimal for DynamoDB compatibility."""
+    from decimal import Decimal
+    if isinstance(obj, float):
+        return Decimal(str(obj))
+    if isinstance(obj, dict):
+        return {k: _sanitize_floats(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_floats(v) for v in obj]
+    return obj
+
 def _put_item(sk: str, data: dict, gsi1pk: str = "", gsi1sk: str = ""):
     """Put an item."""
-    item = {"PK": ORG_PK, "SK": sk, **data}
+    item = _sanitize_floats({"PK": ORG_PK, "SK": sk, **data})
     if gsi1pk:
         item["GSI1PK"] = gsi1pk
     if gsi1sk:
@@ -115,11 +126,29 @@ def transact_write(items: list[dict]) -> bool:
     if len(items) > 100:
         raise ValueError(f"TransactWriteItems supports max 100 items, got {len(items)}")
     try:
+        from boto3.dynamodb.types import TypeSerializer
+        serializer = TypeSerializer()
+        # Convert resource-format items to low-level DynamoDB JSON
+        low_level_items = []
+        for item in items:
+            put = item.get("Put", {})
+            table_name = put.get("TableName", TABLE_NAME)
+            raw_item = put.get("Item", {})
+            # Serialize each attribute value to DynamoDB JSON format
+            ddb_item = {}
+            for k, v in raw_item.items():
+                if v is None:
+                    continue  # skip None values
+                ddb_item[k] = serializer.serialize(v)
+            low_level_items.append({"Put": {"TableName": table_name, "Item": ddb_item}})
         client = boto3.client("dynamodb", region_name=AWS_REGION)
-        client.transact_write_items(TransactItems=items)
+        client.transact_write_items(TransactItems=low_level_items)
         return True
     except ClientError as e:
         print(f"[db] transact_write failed: {e}")
+        return False
+    except Exception as e:
+        print(f"[db] transact_write error: {e}")
         return False
 
 

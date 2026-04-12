@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import Chart from 'react-apexcharts';
 import type { ApexOptions } from 'apexcharts';
-import { DollarSign, TrendingUp, TrendingDown, Users, Bot, AlertTriangle, Download, Calendar, Info, Cpu, Plus } from 'lucide-react';
+import { DollarSign, TrendingUp, TrendingDown, Users, Bot, AlertTriangle, Download, Cpu, Plus, Edit3, Save, Wallet } from 'lucide-react';
 import { Card, StatCard, Badge, Button, PageHeader, Table, Tabs, Select, Modal } from '../components/ui';
-import { useUsageSummary, useUsageByDepartment, useUsageByAgent, useUsageBudgets, useUsageTrend, useUsageByModel, useModelConfig, useUpdateModelConfig, useUpdateFallbackModel, usePositions, useAgentConfig, useKBAssignments } from '../hooks/useApi';
+import { useUsageSummary, useUsageByDepartment, useUsageByAgent, useUsageBudgets, useUsageTrend, useUsageByModel, useModelConfig, useUpdateModelConfig, useUpdateFallbackModel, usePositions, useAgentConfig, useKBAssignments, useUpdateBudgets } from '../hooks/useApi';
+import { useAuth } from '../contexts/AuthContext';
 
 const costTrendOpts: ApexOptions = {
   chart: { type: 'area', toolbar: { show: false }, background: 'transparent' },
@@ -34,12 +35,15 @@ export default function Usage() {
   const { data: kbAssignData } = useKBAssignments();
   const updateDefault = useUpdateModelConfig();
   const updateFallback = useUpdateFallbackModel();
+  const updateBudgets = useUpdateBudgets();
   const [activeTab, setActiveTab] = useState('department');
   const [timeRange, setTimeRange] = useState('7d');
   const [modelModal, setModelModal] = useState<'default' | 'fallback' | null>(null);
   const [selectedModelId, setSelectedModelId] = useState('');
+  const [budgetModal, setBudgetModal] = useState(false);
+  const [budgetDraft, setBudgetDraft] = useState<Record<string, string>>({});
 
-  const s = summary || { totalInputTokens: 0, totalOutputTokens: 0, totalCost: 0, totalRequests: 0, tenantCount: 0, chatgptEquivalent: 5 };
+  const s = summary || { totalInputTokens: 0, totalOutputTokens: 0, totalCost: 0, totalRequests: 0, tenantCount: 0 };
   const m = mc || { default: { modelId: '', modelName: '—', inputRate: 0, outputRate: 0 }, fallback: { modelId: '', modelName: '', inputRate: 0, outputRate: 0 }, positionOverrides: {}, employeeOverrides: {}, availableModels: [] };
   const agentCfg = agentCfgData || { positionConfig: {}, employeeConfig: {} };
   const modelOptions = m.availableModels.map((mo: any) => ({ label: `${mo.modelName}  ($${mo.inputRate} in / $${mo.outputRate} out per 1M tokens)`, value: mo.modelId }));
@@ -51,13 +55,23 @@ export default function Usage() {
     setModelModal(null); setSelectedModelId('');
   };
 
+  const handleBudgetSave = () => {
+    const departments: Record<string, number> = {};
+    for (const [dept, val] of Object.entries(budgetDraft)) {
+      const n = parseFloat(val);
+      if (!isNaN(n) && n > 0) departments[dept] = n;
+    }
+    updateBudgets.mutate({ departments });
+    setBudgetModal(false);
+  };
+
   const buildDeptBarOpts = (depts: typeof byDept): ApexOptions => ({
     chart: { type: 'bar', toolbar: { show: false }, background: 'transparent', stacked: true },
     colors: ['#6366f1', '#22c55e'],
     plotOptions: { bar: { borderRadius: 3, barHeight: '60%', horizontal: true } },
     grid: { borderColor: '#2e3039', strokeDashArray: 4, padding: { left: 10 } },
     xaxis: {
-      categories: depts.map(d => d.department),   // ← department names on y-axis
+      categories: depts.map(d => d.department),
       labels: { style: { colors: '#64748b', fontSize: '11px' }, formatter: (v: string) => `${(Number(v) / 1000).toFixed(0)}k` },
       axisBorder: { show: false }, axisTicks: { show: false },
     },
@@ -154,7 +168,6 @@ export default function Usage() {
         <div className="mt-4">
           {activeTab === 'department' && (
             <div className="space-y-6">
-              {/* Full-width chart — department names now visible on y-axis */}
               <Chart
                 options={buildDeptBarOpts(byDept)}
                 series={[
@@ -163,7 +176,6 @@ export default function Usage() {
                 ]}
                 type="bar" height={Math.max(byDept.length * 44 + 80, 300)}
               />
-              {/* Table with inline cost share bar — visual without needing the chart */}
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-dark-border text-left">
@@ -176,7 +188,7 @@ export default function Usage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {byDept.map((d, i) => {
+                  {byDept.map((d) => {
                     const pct = s.totalCost > 0 ? (d.cost / s.totalCost * 100) : 0;
                     const maxCost = byDept[0]?.cost || 1;
                     return (
@@ -245,17 +257,9 @@ export default function Usage() {
                 <div className="space-y-4">
                   {(() => {
                     const colors = ['#22c55e', '#6366f1', '#f59e0b', '#06b6d4', '#ef4444'];
-                    const modelRates: Record<string, { input: number; output: number }> = {
-                      'nova-2-lite': { input: 0.30, output: 2.50 },
-                      'nova-pro': { input: 0.80, output: 3.20 },
-                      'claude-sonnet': { input: 3.00, output: 15.00 },
-                      'claude-haiku': { input: 0.25, output: 1.25 },
-                    };
                     const totalModelCost = byModel.reduce((s, m) => s + m.cost, 0);
                     return byModel.map((m, i) => {
                       const shortName = m.model.split('/').pop()?.split(':')[0] || m.model;
-                      const rateKey = Object.keys(modelRates).find(k => shortName.toLowerCase().includes(k)) || '';
-                      const rates = modelRates[rateKey] || { input: 0.30, output: 2.50 };
                       const pct = totalModelCost > 0 ? Math.round(m.cost / totalModelCost * 100) : 0;
                       return (
                         <div key={m.model} className="rounded-lg bg-dark-bg p-4">
@@ -268,7 +272,7 @@ export default function Usage() {
                           </div>
                           <div className="grid grid-cols-3 gap-3 text-xs text-text-muted">
                             <div><span className="block text-text-secondary">{m.requests}</span>requests</div>
-                            <div><span className="block text-text-secondary">${rates.input}/${rates.output}</span>per 1M tokens</div>
+                            <div><span className="block text-text-secondary">{((m.inputTokens + m.outputTokens) / 1000).toFixed(1)}k</span>tokens</div>
                             <div><span className="block text-text-secondary">{pct}%</span>of total cost</div>
                           </div>
                         </div>
@@ -281,7 +285,7 @@ export default function Usage() {
                 )}
                 {byModel.length > 0 && (
                   <div className="mt-4 rounded-lg bg-success/5 border border-success/20 p-3 text-xs text-success">
-                    💡 Data from DynamoDB usage records. Real token counts from AgentCore invocations.
+                    Data from DynamoDB usage records. Real token counts from AgentCore invocations.
                   </div>
                 )}
               </div>
@@ -290,13 +294,23 @@ export default function Usage() {
 
           {activeTab === 'budget' && (
             <div>
-              <div className="rounded-xl bg-warning/10 border border-warning/30 px-4 py-3 mb-4 flex items-start gap-2">
-                <AlertTriangle size={15} className="text-warning mt-0.5 shrink-0" />
-                <p className="text-xs text-warning">
-                  <strong>Tracking only — budgets are not enforced.</strong> Agents will not be paused or restricted when a budget is exceeded. These figures are for monitoring and planning only.
-                </p>
+              <div className="flex items-center justify-between mb-4">
+                <div className="rounded-xl bg-warning/10 border border-warning/30 px-4 py-3 flex items-start gap-2 flex-1 mr-4">
+                  <AlertTriangle size={15} className="text-warning mt-0.5 shrink-0" />
+                  <p className="text-xs text-warning">
+                    <strong>Tracking only — budgets are not enforced.</strong> Projected cost uses 7-day active-day average x 30.
+                  </p>
+                </div>
+                <Button variant="primary" size="sm" onClick={() => {
+                  const draft: Record<string, string> = {};
+                  budgets.forEach(b => { draft[b.department] = String(b.budget); });
+                  setBudgetDraft(draft);
+                  setBudgetModal(true);
+                }}>
+                  <Edit3 size={14} /> Edit Budgets
+                </Button>
               </div>
-              <p className="text-sm text-text-secondary mb-4">Monthly budget tracking by department. Projected cost based on current daily usage × 30 days.</p>
+
               <Table
                 columns={[
                   { key: 'dept', label: 'Department', render: (b: typeof budgets[0]) => <span className="font-medium">{b.department}</span> },
@@ -323,14 +337,13 @@ export default function Usage() {
                 data={budgets}
               />
               <div className="mt-4 rounded-lg bg-info/5 border border-info/20 p-3 text-xs text-info">
-                Over-budget actions: Alert → Downgrade model (Sonnet→Nova) → Rate limit → Pause agent
+                Budget resolution: Employee (individual) → Department → Global. 7-day average active-day usage x 30 for projection.
               </div>
             </div>
           )}
-          {/* ── Models & Pricing ── */}
+
           {activeTab === 'pricing' && (
             <div className="space-y-6">
-              {/* Current default + actual spend */}
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 {[
                   { label: 'Default Model', model: m.default, action: () => { setModelModal('default'); setSelectedModelId(m.default.modelId); }, badge: 'primary' as const },
@@ -353,7 +366,6 @@ export default function Usage() {
                 ))}
               </div>
 
-              {/* Per-position/employee overrides — managed in Agent Factory > Configuration */}
               <div className="rounded-xl border border-dark-border/40 bg-surface-dim px-4 py-3 flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-text-primary">Per-Position & Per-Employee Model Overrides</p>
@@ -362,7 +374,6 @@ export default function Usage() {
                 <Badge color="info">{Object.keys({...m.positionOverrides,...(m.employeeOverrides||{})}).length} overrides active</Badge>
               </div>
 
-              {/* All available models as a pricing card */}
               <Card>
                 <h3 className="text-sm font-semibold text-text-primary mb-1">Available Models — Unit Pricing</h3>
                 <p className="text-xs text-text-muted mb-4">Prices per 1 million tokens. Switch default model from the cards above.</p>
@@ -370,7 +381,6 @@ export default function Usage() {
                   {m.availableModels.map((mo: any) => {
                     const isDefault = mo.modelId === m.default.modelId;
                     const isFallback = mo.modelId === m.fallback.modelId;
-                    // Find actual spend for this model from byModel data
                     const modelSpend = byModel.find(bm => bm.model?.includes(mo.modelId?.split('/').pop()?.split(':')[0] || '??'));
                     return (
                       <div key={mo.modelId} className={`flex items-center gap-4 rounded-xl px-4 py-3 ${isDefault ? 'bg-primary/5 border border-primary/20' : isFallback ? 'bg-warning/5 border border-warning/20' : 'bg-surface-dim'}`}>
@@ -394,24 +404,6 @@ export default function Usage() {
                 </div>
               </Card>
 
-              {/* Memory & Context — now in Agent Factory */}
-              <div className="rounded-xl border border-dark-border/40 bg-surface-dim px-4 py-3 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-text-primary">Memory & Context Settings</p>
-                  <p className="text-xs text-text-muted">Configure in Agent Factory → Configuration tab</p>
-                </div>
-                <Badge color="info">{Object.keys(agentCfg.positionConfig || {}).length} positions configured</Badge>
-              </div>
-
-              {/* KB Assignments — now in Knowledge Base */}
-              <div className="rounded-xl border border-dark-border/40 bg-surface-dim px-4 py-3 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-text-primary">Knowledge Base Assignments</p>
-                  <p className="text-xs text-text-muted">Configure in Knowledge Base → Assignments tab</p>
-                </div>
-                <Badge color="info">{Object.keys((kbAssignData?.positionKBs || {})).length} positions assigned</Badge>
-              </div>
-
               <div className="rounded-xl bg-info/5 border border-info/20 px-4 py-3 text-xs text-info">
                 Model changes take effect on the next agent cold start (~15 min idle timeout). Actual Bedrock billing may differ slightly from estimated costs.
               </div>
@@ -420,7 +412,7 @@ export default function Usage() {
         </div>
       </Card>
 
-      {/* Model change modal — default/fallback only; overrides are in Agent Factory */}
+      {/* Model change modal */}
       {modelModal && (
         <Modal open={true} onClose={() => setModelModal(null)}
           title={modelModal === 'default' ? 'Change Default Model' : 'Change Fallback Model'}
@@ -431,6 +423,37 @@ export default function Usage() {
         </Modal>
       )}
 
+      {/* Budget edit modal */}
+      {budgetModal && (
+        <Modal open={true} onClose={() => setBudgetModal(false)}
+          title="Edit Department Budgets"
+          footer={<div className="flex justify-end gap-3">
+            <Button variant="default" onClick={() => setBudgetModal(false)}>Cancel</Button>
+            <Button variant="primary" onClick={handleBudgetSave} disabled={updateBudgets.isPending}>
+              <Save size={13} /> {updateBudgets.isPending ? 'Saving...' : 'Save Budgets'}
+            </Button>
+          </div>}>
+          <p className="text-xs text-text-muted mb-4">Set monthly budget (USD) per department. Changes are audited.</p>
+          <div className="space-y-3">
+            {budgets.map(b => (
+              <div key={b.department} className="flex items-center gap-3">
+                <span className="text-sm text-text-primary w-40 shrink-0">{b.department}</span>
+                <div className="flex items-center gap-1">
+                  <span className="text-text-muted">$</span>
+                  <input
+                    type="number"
+                    value={budgetDraft[b.department] || ''}
+                    onChange={e => setBudgetDraft(prev => ({ ...prev, [b.department]: e.target.value }))}
+                    className="w-28 rounded-lg border border-dark-border bg-dark-bg px-3 py-1.5 text-sm text-text-primary focus:border-primary focus:outline-none"
+                    placeholder={String(b.budget)}
+                  />
+                </div>
+                <span className="text-xs text-text-muted">Current: ${b.budget}</span>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

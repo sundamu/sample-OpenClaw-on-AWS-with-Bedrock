@@ -14,7 +14,7 @@ import {
   useModelConfig, useUpdateModelConfig, useUpdateFallbackModel,
   useSetPositionModel, useRemovePositionModel,
   usePositionRuntimeMap, useSetPositionRuntime, useDeletePositionRuntime,
-  useGuardrails,
+  useGuardrails, useServiceStatus,
 } from '../hooks/useApi';
 import { Select } from '../components/ui';
 
@@ -60,7 +60,7 @@ function TimeSlider({ label, value, onChange, min = 60, max = 28800 }: {
 
 // ─── Runtime Edit Modal ───────────────────────────────────────────────────────
 
-function RuntimeEditModal({ rt, models, onClose }: { rt: any; models: any[]; onClose: () => void }) {
+function RuntimeEditModal({ rt, models, onClose, awsRegion = 'us-east-1' }: { rt: any; models: any[]; onClose: () => void; awsRegion?: string }) {
   const { data: ecrData } = useEcrImages();
   const { data: iamData } = useIamRoles();
   const { data: vpcData } = useVpcResources();
@@ -218,7 +218,7 @@ function RuntimeEditModal({ rt, models, onClose }: { rt: any; models: any[]; onC
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-xs font-semibold text-text-secondary">Security Groups</label>
-                <a href={`https://console.aws.amazon.com/vpc/home?region=us-east-1#SecurityGroups:`} target="_blank" rel="noreferrer">
+                <a href={`https://console.aws.amazon.com/vpc/home?region=${awsRegion}#SecurityGroups:`} target="_blank" rel="noreferrer">
                   <Button size="sm" variant="ghost"><ExternalLink size={12} /> Create in AWS</Button>
                 </a>
               </div>
@@ -239,7 +239,7 @@ function RuntimeEditModal({ rt, models, onClose }: { rt: any; models: any[]; onC
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-xs font-semibold text-text-secondary">Subnets</label>
-                <a href={`https://console.aws.amazon.com/vpc/home?region=us-east-1#subnets:`} target="_blank" rel="noreferrer">
+                <a href={`https://console.aws.amazon.com/vpc/home?region=${awsRegion}#subnets:`} target="_blank" rel="noreferrer">
                   <Button size="sm" variant="ghost"><ExternalLink size={12} /> View in AWS</Button>
                 </a>
               </div>
@@ -265,7 +265,7 @@ function RuntimeEditModal({ rt, models, onClose }: { rt: any; models: any[]; onC
 
 // ─── Create Runtime Modal ─────────────────────────────────────────────────────
 
-function CreateRuntimeModal({ models, onClose }: { models: any[]; onClose: () => void }) {
+function CreateRuntimeModal({ models, onClose, awsRegion = 'us-east-1' }: { models: any[]; onClose: () => void; awsRegion?: string }) {
   const { data: ecrData } = useEcrImages();
   const { data: iamData } = useIamRoles();
   const { data: vpcData } = useVpcResources();
@@ -353,7 +353,7 @@ function CreateRuntimeModal({ models, onClose }: { models: any[]; onClose: () =>
 
 // ─── Runtime Card ─────────────────────────────────────────────────────────────
 
-function RuntimeCard({ rt, models }: { rt: any; models: any[] }) {
+function RuntimeCard({ rt, models, awsRegion = 'us-east-1', runtimeMap = {}, positions = [] }: { rt: any; models: any[]; awsRegion?: string; runtimeMap?: Record<string, string>; positions?: any[] }) {
   const [showEdit, setShowEdit] = useState(false);
   const isExec = rt.name?.toLowerCase().includes('exec') || rt.containerUri?.includes('exec');
   const imageTag = rt.containerUri?.split('/').pop() || 'unknown';
@@ -385,7 +385,7 @@ function RuntimeCard({ rt, models }: { rt: any; models: any[] }) {
         <div className="space-y-2 mb-4">
           {[
             { label: 'Container Image', value: imageTag,
-              extra: <a href={`https://console.aws.amazon.com/ecr/repositories?region=us-east-1`} target="_blank" rel="noreferrer"><ExternalLink size={11} className="text-text-muted hover:text-primary" /></a> },
+              extra: <a href={`https://console.aws.amazon.com/ecr/repositories?region=${awsRegion}`} target="_blank" rel="noreferrer"><ExternalLink size={11} className="text-text-muted hover:text-primary" /></a> },
             { label: 'Default Model', value: modelName,
               extra: isExec ? <Badge color="warning">Executive</Badge> : null },
             { label: 'IAM Role', value: roleName,
@@ -420,9 +420,28 @@ function RuntimeCard({ rt, models }: { rt: any; models: any[] }) {
             </div>
           ))}
         </div>
+
+        {/* Assigned Positions */}
+        {(() => {
+          const assignedPositions = Object.entries(runtimeMap)
+            .filter(([_, rid]) => rid === rt.id)
+            .map(([posId]) => positions.find(p => p.id === posId))
+            .filter(Boolean);
+          if (assignedPositions.length === 0) return null;
+          return (
+            <div className="border-t border-dark-border/30 pt-3 mt-3">
+              <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2">Assigned Positions ({assignedPositions.length})</p>
+              <div className="flex flex-wrap gap-1.5">
+                {assignedPositions.map((p: any) => (
+                  <Badge key={p.id} color={isExec ? 'warning' : 'primary'}>{p.name}</Badge>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </Card>
 
-      {showEdit && <RuntimeEditModal rt={rt} models={models} onClose={() => setShowEdit(false)} />}
+      {showEdit && <RuntimeEditModal rt={rt} models={models} onClose={() => setShowEdit(false)} awsRegion={awsRegion} />}
     </>
   );
 }
@@ -825,6 +844,8 @@ export default function SecurityCenter() {
   const { data: positions = [] } = usePositions();
   const { data: modelConfig } = useModelConfig();
   const { data: infra } = useInfrastructure();
+  const { data: serviceData } = useServiceStatus();
+  const awsRegion = serviceData?.bedrock?.region || (serviceData as any)?.platform?.awsRegion || 'us-east-1';
 
   const [soulTarget, setSoulTarget] = useState<any | null | undefined>(undefined);
   const [toolsTarget, setToolsTarget] = useState<any | null>(null);
@@ -890,7 +911,7 @@ export default function SecurityCenter() {
             ) : (
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 {runtimes.map(rt => (
-                  <RuntimeCard key={rt.id} rt={rt} models={models} />
+                  <RuntimeCard key={rt.id} rt={rt} models={models} awsRegion={awsRegion} runtimeMap={runtimeMap} positions={positions} />
                 ))}
               </div>
             )}
@@ -1022,7 +1043,7 @@ export default function SecurityCenter() {
                   <h3 className="text-sm font-semibold text-text-primary">Docker Images (ECR)</h3>
                   <Badge color="info">{infra?.ecrImages?.length || 0} images</Badge>
                 </div>
-                <a href="https://console.aws.amazon.com/ecr/repositories?region=us-east-1" target="_blank" rel="noreferrer">
+                <a href={`https://console.aws.amazon.com/ecr/repositories?region=${awsRegion}`} target="_blank" rel="noreferrer">
                   <Button size="sm" variant="ghost"><ExternalLink size={13} /> Open ECR Console</Button>
                 </a>
               </div>
@@ -1041,7 +1062,7 @@ export default function SecurityCenter() {
                       </div>
                       <div className="flex items-center gap-2 ml-4">
                         <Badge color="success">Available</Badge>
-                        <a href={`https://console.aws.amazon.com/ecr/repositories/private/${img.uri?.split('/')[0]?.split('.')[0]}/${img.repo}?region=us-east-1`} target="_blank" rel="noreferrer">
+                        <a href={`https://console.aws.amazon.com/ecr/repositories/private/${img.uri?.split('/')[0]?.split('.')[0]}/${img.repo}?region=${awsRegion}`} target="_blank" rel="noreferrer">
                           <Button size="sm" variant="ghost"><ExternalLink size={11} /></Button>
                         </a>
                       </div>
@@ -1115,10 +1136,10 @@ export default function SecurityCenter() {
                   <h3 className="text-sm font-semibold text-text-primary">VPC & Security Groups</h3>
                 </div>
                 <div className="flex gap-2">
-                  <a href="https://console.aws.amazon.com/vpc/home?region=us-east-1#SecurityGroups:" target="_blank" rel="noreferrer">
+                  <a href={`https://console.aws.amazon.com/vpc/home?region=${awsRegion}#SecurityGroups:`} target="_blank" rel="noreferrer">
                     <Button size="sm" variant="ghost"><ExternalLink size={13} /> Create SG</Button>
                   </a>
-                  <a href="https://console.aws.amazon.com/vpc/home?region=us-east-1#vpcs:" target="_blank" rel="noreferrer">
+                  <a href={`https://console.aws.amazon.com/vpc/home?region=${awsRegion}#vpcs:`} target="_blank" rel="noreferrer">
                     <Button size="sm" variant="ghost"><ExternalLink size={13} /> VPC Console</Button>
                   </a>
                 </div>
@@ -1154,7 +1175,7 @@ export default function SecurityCenter() {
                           </div>
                           <div className="flex items-center gap-2">
                             {sg.relevant && <Badge color="primary">AgentCore</Badge>}
-                            <a href={`https://console.aws.amazon.com/vpc/home?region=us-east-1#SecurityGroup:groupId=${sg.id}`} target="_blank" rel="noreferrer">
+                            <a href={`https://console.aws.amazon.com/vpc/home?region=${awsRegion}#SecurityGroup:groupId=${sg.id}`} target="_blank" rel="noreferrer">
                               <Button size="sm" variant="ghost"><ExternalLink size={11} /></Button>
                             </a>
                           </div>
@@ -1179,7 +1200,7 @@ export default function SecurityCenter() {
       )}
       {/* Create Runtime Modal */}
       {showCreateRuntime && (
-        <CreateRuntimeModal models={models} onClose={() => setShowCreateRuntime(false)} />
+        <CreateRuntimeModal models={models} onClose={() => setShowCreateRuntime(false)} awsRegion={awsRegion} />
       )}
     </div>
   );

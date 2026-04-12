@@ -197,7 +197,7 @@ def _simulate_agent(emp_id: str, message: str, profile: dict) -> dict:
 
     try:
         bedrock = _b3sim.client("bedrock-runtime", region_name=GATEWAY_REGION)
-        model_id = os.environ.get("BEDROCK_MODEL_ID", "global.amazon.nova-2-lite-v1:0")
+        model_id = os.environ.get("BEDROCK_MODEL_ID", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
         resp = bedrock.converse(
             modelId=model_id,
             system=[{"text": system[:8000]}],

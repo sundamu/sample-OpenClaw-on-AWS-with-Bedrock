@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Download, Search, AlertTriangle, CheckCircle, XCircle, Info, Clock, Brain, Scan, Loader, Sparkles, ShieldAlert, Filter } from 'lucide-react';
+import { Shield, Download, Search, AlertTriangle, CheckCircle, XCircle, Info, Clock, Brain, Scan, Loader, Sparkles, ShieldAlert, Filter, ThumbsUp, ThumbsDown, BarChart3, Calendar } from 'lucide-react';
 import { Card, Badge, Button, PageHeader, Table, StatCard, Tabs } from '../components/ui';
-import { useAuditEntries, useAuditInsights, useRunAuditScan, useGuardrailEvents } from '../hooks/useApi';
+import { useAuditEntries, useAuditInsights, useRunAuditScan, useGuardrailEvents, useAuditReviews, useAuditCompliance, useAuditAnalyze } from '../hooks/useApi';
+import { api } from '../api/client';
 import type { AuditEntry } from '../types';
 
 const eventTypeOptions = [
@@ -42,18 +43,44 @@ export default function AuditLog() {
   const [eventType, setEventType] = useState('all');
   const [activeTab, setActiveTab] = useState('insights');
   const [currentPage, setCurrentPage] = useState(1);
+  const [sinceDate, setSinceDate] = useState('');
+  const [beforeDate, setBeforeDate] = useState('');
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [analyzeResult, setAnalyzeResult] = useState<Record<string, any>>({});
   const pageSize = 10;
   const navigate = useNavigate();
 
   const { data: AUDIT_ENTRIES = [] } = useAuditEntries({ limit: 50, eventType: eventType !== 'all' ? eventType : undefined });
   const { data: insightsData, refetch: refetchInsights } = useAuditInsights();
   const { data: guardrailData } = useGuardrailEvents(50);
+  const { data: reviewsData, refetch: refetchReviews } = useAuditReviews();
+  const { data: complianceData } = useAuditCompliance();
   const runScan = useRunAuditScan();
+  const analyzeEntry = useAuditAnalyze();
   const insights = insightsData?.insights || [];
   const insightsSummary = insightsData?.summary;
   const guardrailEvents = guardrailData?.events || [];
+  const reviews = reviewsData?.reviews || [];
+  const compliance = complianceData || {};
 
-  // Compute stats
+  const handleAnalyze = async (entryId: string) => {
+    setAnalyzingId(entryId);
+    try {
+      const result = await analyzeEntry.mutateAsync({ entryId });
+      setAnalyzeResult(prev => ({ ...prev, [entryId]: result }));
+    } catch (e: any) {
+      setAnalyzeResult(prev => ({ ...prev, [entryId]: { error: e.message } }));
+    }
+    setAnalyzingId(null);
+  };
+
+  const handleReviewAction = async (entryId: string, action: 'approve' | 'reject') => {
+    try {
+      await api.post(`/audit/review/${entryId}/${action}`, {});
+      refetchReviews();
+    } catch {}
+  };
+
   const stats = useMemo(() => {
     const total = AUDIT_ENTRIES.length;
     const blocked = AUDIT_ENTRIES.filter(e => e.status === 'blocked').length;
@@ -73,7 +100,9 @@ export default function AuditLog() {
       (e.actorName || '').toLowerCase().includes(filterText.toLowerCase()) ||
       (e.detail || '').toLowerCase().includes(filterText.toLowerCase());
     const matchesType = eventType === 'all' || e.eventType === eventType;
-    return matchesText && matchesType;
+    const matchesSince = !sinceDate || new Date(e.timestamp) >= new Date(sinceDate);
+    const matchesBefore = !beforeDate || new Date(e.timestamp) <= new Date(beforeDate + 'T23:59:59');
+    return matchesText && matchesType && matchesSince && matchesBefore;
   });
 
   const paginated = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -83,7 +112,7 @@ export default function AuditLog() {
     <div>
       <PageHeader
         title="Audit Center"
-        description="Conversation audit, sensitive operation logs, and compliance tracking"
+        description="Conversation audit, review queue, compliance tracking, and AI-powered analysis"
         actions={<Button variant="default" onClick={() => {
           const csv = ['Timestamp,Event Type,Actor,Target,Detail,Status', ...AUDIT_ENTRIES.map(e =>
             `"${e.timestamp}","${e.eventType}","${e.actorName || ''}","${e.targetType}","${(e.detail || '').replace(/"/g, '""')}","${e.status}"`)].join('\n');
@@ -100,7 +129,7 @@ export default function AuditLog() {
         <StatCard title="Agent Invocations" value={stats.invocations} icon={<CheckCircle size={22} />} color="success" />
         <StatCard title="Tool Executions" value={stats.toolExecs} icon={<Clock size={22} />} color="info" />
         <StatCard title="Permission Denied" value={stats.blocked} icon={<XCircle size={22} />} color="danger" />
-        <StatCard title="Guardrail Blocks" value={guardrailEvents.length} icon={<ShieldAlert size={22} />} color="warning" />
+        <StatCard title="Pending Reviews" value={reviews.length} icon={<ThumbsUp size={22} />} color="warning" />
         <StatCard title="Config Changes" value={stats.configChanges} icon={<AlertTriangle size={22} />} color="warning" />
       </div>
 
@@ -108,6 +137,8 @@ export default function AuditLog() {
         <Tabs
           tabs={[
             { id: 'insights', label: 'AI Insights', count: insightsSummary?.high || undefined },
+            { id: 'reviews', label: 'Review Queue', count: reviews.length || undefined },
+            { id: 'compliance', label: 'Compliance' },
             { id: 'timeline', label: 'Event Timeline', count: filtered.length },
             { id: 'breakdown', label: 'Breakdown' },
             { id: 'security', label: 'Security Alerts', count: stats.blocked || undefined },
@@ -133,22 +164,9 @@ export default function AuditLog() {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button
-                    variant="default" size="sm"
-                    disabled={runScan.isPending}
-                    onClick={() => runScan.mutate()}
-                  >
+                  <Button variant="default" size="sm" disabled={runScan.isPending} onClick={() => runScan.mutate()}>
                     {runScan.isPending ? <Loader size={14} className="animate-spin" /> : <Scan size={14} />}
                     {runScan.isPending ? 'Scanning...' : 'Run Scan'}
-                  </Button>
-                  <Button
-                    variant="default" size="sm"
-                    className="opacity-60 cursor-not-allowed"
-                    onClick={() => {}}
-                  >
-                    <Sparkles size={14} />
-                    Analyze Memories
-                    <span className="ml-1 text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">Soon</span>
                   </Button>
                 </div>
               </div>
@@ -215,6 +233,102 @@ export default function AuditLog() {
             </div>
           )}
 
+          {/* Review Queue Tab */}
+          {activeTab === 'reviews' && (
+            <div>
+              <p className="text-sm text-text-secondary mb-4">
+                Pending SOUL/KB changes and sensitive config updates awaiting admin review. Approve or reject with optional revert.
+              </p>
+              {reviews.length === 0 ? (
+                <div className="text-center py-12 text-text-muted">
+                  <CheckCircle size={32} className="mx-auto mb-3 text-green-400" />
+                  <p className="text-sm">No pending reviews — all clear</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {reviews.map((review: any) => (
+                    <div key={review.id || review.entryId} className="flex items-start gap-4 rounded-lg bg-amber-500/5 border border-amber-500/20 px-4 py-3">
+                      <Clock size={18} className="text-amber-400 mt-0.5 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <span className="text-sm font-semibold text-text-primary">{review.title || review.eventType?.replace(/_/g, ' ')}</span>
+                          <Badge color="warning">Pending Review</Badge>
+                          {review.ageHours && <Badge color={review.ageHours > 24 ? 'danger' : 'default'}>{review.ageHours}h ago</Badge>}
+                        </div>
+                        <p className="text-sm text-text-secondary">{review.detail || review.description}</p>
+                        <p className="text-xs text-text-muted mt-1">
+                          By: {review.actorName || review.actor} · {review.timestamp ? new Date(review.timestamp).toLocaleString() : ''}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <Button variant="primary" size="sm" onClick={() => handleReviewAction(review.id || review.entryId, 'approve')}>
+                          <ThumbsUp size={13} /> Approve
+                        </Button>
+                        <Button variant="default" size="sm" onClick={() => handleReviewAction(review.id || review.entryId, 'reject')}>
+                          <ThumbsDown size={13} /> Reject
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Compliance Tab */}
+          {activeTab === 'compliance' && (
+            <div>
+              <p className="text-sm text-text-secondary mb-4">
+                7-day compliance overview: SOUL version compliance, daily enforcement breakdown, and overall enforcement rate.
+              </p>
+              <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className="rounded-lg bg-dark-bg p-4 text-center">
+                  <p className="text-3xl font-bold text-green-400">{(() => { const er = (compliance as any)?.enforcementRate; if (!er) return '—'; if (typeof er === 'number') return `${(er * 100).toFixed(1)}%`; if (er.rate != null) return `${er.rate.toFixed ? er.rate.toFixed(1) : er.rate}%`; return '—'; })()}</p>
+                  <p className="text-xs text-text-muted uppercase tracking-wider mt-1">Enforcement Rate</p>
+                </div>
+                <div className="rounded-lg bg-dark-bg p-4 text-center">
+                  <p className="text-3xl font-bold text-blue-400">{(() => { const sc = (compliance as any)?.soulCompliance || (compliance as any)?.soulComplianceRate; if (!sc) return '—'; if (typeof sc === 'number') return `${(sc * 100).toFixed(1)}%`; if (sc.rate != null) return `${sc.rate}%`; return '—'; })()}</p>
+                  <p className="text-xs text-text-muted uppercase tracking-wider mt-1">SOUL Compliance</p>
+                </div>
+                <div className="rounded-lg bg-dark-bg p-4 text-center">
+                  <p className="text-3xl font-bold text-text-primary">{(compliance as any)?.totalEvents || '—'}</p>
+                  <p className="text-xs text-text-muted uppercase tracking-wider mt-1">Total Events (7d)</p>
+                </div>
+              </div>
+
+              {/* Daily breakdown */}
+              {(compliance as any)?.dailyBreakdown && (
+                <Card>
+                  <h3 className="text-sm font-semibold text-text-primary mb-3">Daily Enforcement Breakdown</h3>
+                  <div className="space-y-2">
+                    {((compliance as any).dailyBreakdown as any[]).map((day: any) => (
+                      <div key={day.date} className="flex items-center gap-3 rounded-lg bg-surface-dim px-4 py-2.5">
+                        <span className="text-xs font-mono text-text-muted w-20">{day.date}</span>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-2 rounded-full bg-dark-bg overflow-hidden">
+                              <div className="h-full rounded-full bg-green-500" style={{ width: `${day.allowed && day.total ? (day.allowed / day.total * 100) : 0}%` }} />
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-xs text-green-400 w-16 text-right">{day.allowed || 0} pass</span>
+                        <span className="text-xs text-red-400 w-16 text-right">{day.blocked || 0} block</span>
+                        <span className="text-xs text-text-muted w-16 text-right">{day.total || 0} total</span>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              {!(compliance as any)?.dailyBreakdown && (
+                <div className="text-center py-8 text-text-muted">
+                  <BarChart3 size={32} className="mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">No compliance data available yet</p>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === 'timeline' && (
             <>
               {/* Filters */}
@@ -229,12 +343,26 @@ export default function AuditLog() {
                   className="rounded-lg border border-dark-border bg-dark-bg px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none">
                   {eventTypeOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
+                <div className="flex items-center gap-2">
+                  <Calendar size={14} className="text-text-muted" />
+                  <input type="date" value={sinceDate} onChange={e => { setSinceDate(e.target.value); setCurrentPage(1); }}
+                    className="rounded-lg border border-dark-border bg-dark-bg px-2 py-1.5 text-xs text-text-primary focus:border-primary focus:outline-none"
+                    title="Since date" />
+                  <span className="text-text-muted text-xs">to</span>
+                  <input type="date" value={beforeDate} onChange={e => { setBeforeDate(e.target.value); setCurrentPage(1); }}
+                    className="rounded-lg border border-dark-border bg-dark-bg px-2 py-1.5 text-xs text-text-primary focus:border-primary focus:outline-none"
+                    title="Before date" />
+                  {(sinceDate || beforeDate) && (
+                    <button onClick={() => { setSinceDate(''); setBeforeDate(''); setCurrentPage(1); }}
+                      className="text-xs text-primary-light hover:underline">Clear</button>
+                  )}
+                </div>
               </div>
 
               {/* Timeline View */}
               <div className="space-y-1">
-                {paginated.map((e, i) => (
-                  <div key={e.id} className="flex items-start gap-4 rounded-lg px-4 py-3 hover:bg-dark-hover transition-colors">
+                {paginated.map((e) => (
+                  <div key={e.id} className="flex items-start gap-4 rounded-lg px-4 py-3 hover:bg-dark-hover transition-colors group">
                     <div className="mt-0.5">{statusIcon(e.status)}</div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -243,10 +371,29 @@ export default function AuditLog() {
                         <Badge>{e.targetType}</Badge>
                       </div>
                       <p className="text-sm text-text-secondary mt-0.5">{e.detail}</p>
+                      {analyzeResult[e.id] && (
+                        <div className="mt-2 rounded-lg bg-primary/5 border border-primary/20 px-3 py-2">
+                          <p className="text-xs text-primary-light font-medium mb-1">AI Analysis</p>
+                          {analyzeResult[e.id].error ? (
+                            <p className="text-xs text-danger">{analyzeResult[e.id].error}</p>
+                          ) : (
+                            <p className="text-xs text-text-secondary">{analyzeResult[e.id].analysis || analyzeResult[e.id].summary || JSON.stringify(analyzeResult[e.id])}</p>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-xs text-text-muted">{new Date(e.timestamp).toLocaleTimeString()}</p>
-                      <p className="text-[10px] text-text-muted">{new Date(e.timestamp).toLocaleDateString()}</p>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Button variant="ghost" size="sm"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity"
+                        disabled={analyzingId === e.id}
+                        onClick={() => handleAnalyze(e.id)}>
+                        {analyzingId === e.id ? <Loader size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                        Analyze
+                      </Button>
+                      <div className="text-right">
+                        <p className="text-xs text-text-muted">{new Date(e.timestamp).toLocaleTimeString()}</p>
+                        <p className="text-[10px] text-text-muted">{new Date(e.timestamp).toLocaleDateString()}</p>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -266,7 +413,6 @@ export default function AuditLog() {
 
           {activeTab === 'breakdown' && (
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              {/* Event Type Distribution */}
               <div>
                 <h3 className="text-sm font-semibold text-text-primary mb-4">Events by Type</h3>
                 <div className="space-y-3">
@@ -290,8 +436,6 @@ export default function AuditLog() {
                   })}
                 </div>
               </div>
-
-              {/* Top Actors */}
               <div>
                 <h3 className="text-sm font-semibold text-text-primary mb-4">Most Active Users</h3>
                 <div className="space-y-2">
@@ -336,14 +480,14 @@ export default function AuditLog() {
             <div>
               <div className="rounded-xl bg-warning/5 border border-warning/20 px-4 py-3 text-xs text-warning mb-4 flex items-center gap-2">
                 <ShieldAlert size={16} />
-                <span>Bedrock Guardrail intercepts — every blocked user input and filtered agent output. Standard Runtime only. Exec Runtime has no guardrail restrictions.</span>
+                <span>Bedrock Guardrail intercepts — every blocked user input and filtered agent output.</span>
               </div>
 
               {guardrailEvents.length === 0 ? (
                 <div className="text-center py-12 text-text-muted">
                   <ShieldAlert size={32} className="mx-auto mb-3 opacity-30" />
                   <p className="text-sm">No guardrail blocks yet</p>
-                  <p className="text-xs mt-1">Blocks appear here when Standard Runtime agents trigger topic denial or PII rules.</p>
+                  <p className="text-xs mt-1">Blocks appear here when agents trigger topic denial or PII rules.</p>
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -388,7 +532,7 @@ export default function AuditLog() {
 
           {activeTab === 'security' && (
             <div>
-              <p className="text-sm text-text-secondary mb-4">Permission denials and security-relevant events. These indicate policy enforcement working correctly, or potential unauthorized access attempts.</p>
+              <p className="text-sm text-text-secondary mb-4">Permission denials and security-relevant events.</p>
               <div className="space-y-2">
                 {AUDIT_ENTRIES.filter(e => e.status === 'blocked' || e.eventType === 'permission_denied').map(e => (
                   <div key={e.id} className="flex items-start gap-4 rounded-lg bg-red-500/5 border border-red-500/10 px-4 py-3">

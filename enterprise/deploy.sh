@@ -57,7 +57,7 @@ done
 # ── Defaults ──────────────────────────────────────────────────────────────────
 STACK_NAME="${STACK_NAME:-openclaw}"
 REGION="${REGION:-us-east-1}"
-MODEL="${MODEL:-global.amazon.nova-2-lite-v1:0}"
+MODEL="${MODEL:-global.anthropic.claude-sonnet-4-5-20250929-v1:0}"
 INSTANCE_TYPE="${INSTANCE_TYPE:-c7g.large}"
 KEY_PAIR="${KEY_PAIR:-}"
 EXISTING_VPC_ID="${EXISTING_VPC_ID:-}"
@@ -442,6 +442,9 @@ else
   AWS_REGION="$DYNAMODB_REGION" $SEED_PYTHON seed_settings.py --table "$DYNAMODB_TABLE" --region "$DYNAMODB_REGION" 2>/dev/null && \
     success "  Settings seeded" || warn "  seed_settings.py skipped (not found)"
 
+  AWS_REGION="$DYNAMODB_REGION" $SEED_PYTHON seed_knowledge.py --table "$DYNAMODB_TABLE" --region "$DYNAMODB_REGION" 2>/dev/null && \
+    success "  Knowledge base metadata seeded" || warn "  seed_knowledge.py skipped"
+
   AWS_REGION="$REGION" S3_BUCKET="$S3_BUCKET" \
     $SEED_PYTHON seed_knowledge_docs.py --bucket "$S3_BUCKET" --region "$REGION" && \
     success "  Knowledge docs uploaded"
@@ -497,6 +500,7 @@ ECS_TASK_DEF=${ECS_TASK_DEF}
 ECS_TASK_SG=${ECS_TASK_SG}
 ECS_SUBNET=${ECS_SUBNET}
 EFS_ID=${EFS_ID}
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
 ENVEOF
 aws s3 cp "$ENV_TMPFILE" "s3://${S3_BUCKET}/_deploy/env" --region "$REGION" --quiet
 rm -f "$ENV_TMPFILE"

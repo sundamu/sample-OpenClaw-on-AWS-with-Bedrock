@@ -370,7 +370,7 @@ class CreateRuntimeRequest(BaseModel):
     networkMode: str = "PUBLIC"
     securityGroupIds: list = []
     subnetIds: list = []
-    modelId: str = "global.amazon.nova-2-lite-v1:0"
+    modelId: str = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
     idleTimeoutSec: int = 900
     maxLifetimeSec: int = 28800
 

@@ -295,14 +295,14 @@ export function useRunAuditScan() {
 export function useAuditReviews() {
   return useQuery<{ reviews: any[] }>({
     queryKey: ['audit-reviews'],
-    queryFn: () => api.get('/audit/reviews'),
+    queryFn: () => api.get('/audit/review-queue'),
   });
 }
 
 export function useAuditCompliance() {
   return useQuery<any>({
     queryKey: ['audit-compliance'],
-    queryFn: () => api.get('/audit/compliance'),
+    queryFn: () => api.get('/audit/compliance-stats'),
   });
 }
 
@@ -346,7 +346,7 @@ export function useDashboard() {
 // === Usage (multi-dimension) ===
 
 export function useUsageSummary() {
-  return useQuery<{ totalInputTokens: number; totalOutputTokens: number; totalCost: number; totalRequests: number; tenantCount: number; chatgptEquivalent: number }>({
+  return useQuery<{ totalInputTokens: number; totalOutputTokens: number; totalCost: number; totalRequests: number; tenantCount: number }>({
     queryKey: ['usage-summary'],
     queryFn: () => api.get('/usage/summary'),
   });
@@ -385,6 +385,31 @@ export function useUsageBudgets() {
   return useQuery<{ department: string; budget: number; used: number; projected: number; status: string }[]>({
     queryKey: ['usage-budgets'],
     queryFn: () => api.get('/usage/budgets'),
+  });
+}
+
+export function useMyBudget(empId: string) {
+  return useQuery<{ budget: number; used: number; remaining: number; source: string; projected: number }>({
+    queryKey: ['my-budget', empId],
+    queryFn: () => api.get(`/usage/my-budget?emp_id=${empId}`),
+    enabled: !!empId,
+  });
+}
+
+export function useDepartmentBudget(deptName: string) {
+  return useQuery<{ department: string; budget: number; used: number; projected: number; members: any[] }>({
+    queryKey: ['dept-budget', deptName],
+    queryFn: () => api.get(`/usage/department-budget?department=${encodeURIComponent(deptName)}`),
+    enabled: !!deptName,
+  });
+}
+
+export function useUpdateBudgets() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { global?: number; departments?: Record<string, number>; employees?: Record<string, number> }) =>
+      api.put('/usage/budgets', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['usage-budgets'] }),
   });
 }
 
@@ -572,6 +597,59 @@ export function useUnassignSkill() {
   });
 }
 
+
+// === Skill Submission + Review ===
+
+export function usePendingSkills() {
+  return useQuery<any[]>({
+    queryKey: ['pending-skills'],
+    queryFn: () => api.get('/tools-skills/pending'),
+  });
+}
+
+export function useSubmitSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; description: string; category: string; toolJs: string; setupGuide?: string; requiredEnv?: string[]; requiredTools?: string[] }) =>
+      api.post<{ submitted: boolean; skillName: string }>('/portal/skills/submit', data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['pending-skills'] }); qc.invalidateQueries({ queryKey: ['skills'] }); },
+  });
+}
+
+export function useRequestSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ skillName, reason }: { skillName: string; reason?: string }) =>
+      api.post<{ requested: boolean }>(`/portal/skills/${skillName}/request`, { reason }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['approvals'] }),
+  });
+}
+
+export function useReviewSkill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ skillName, action, reason }: { skillName: string; action: 'approve' | 'reject'; reason?: string }) =>
+      api.post<{ action: string }>(`/tools-skills/${skillName}/review`, { action, reason }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['pending-skills'] }); qc.invalidateQueries({ queryKey: ['skills'] }); },
+  });
+}
+
+export function useSkillCode(skillName: string, source: string = 'shared') {
+  return useQuery<{ toolJs: string; manifest: any; setupGuide: string }>({
+    queryKey: ['skill-code', skillName, source],
+    queryFn: () => api.get(`/tools-skills/${skillName}/code?source=${source}`),
+    enabled: !!skillName,
+  });
+}
+
+export function useApproveSkillInstall() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ skillName, approvalId }: { skillName: string; approvalId: string }) =>
+      api.post<{ approved: boolean }>(`/tools-skills/${skillName}/approve-install`, { approvalId }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['approvals'] }); qc.invalidateQueries({ queryKey: ['employees'] }); },
+  });
+}
 
 // === Approvals ===
 
@@ -878,6 +956,20 @@ export function useAdminHistory() {
   return useQuery<{ history: any[] }>({
     queryKey: ['admin-history'],
     queryFn: () => api.get('/settings/admin-assistant/history'),
+  });
+}
+
+export function useClearAdminHistory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.del('/settings/admin-assistant/history'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-history'] }),
+  });
+}
+
+export function useRestartService() {
+  return useMutation({
+    mutationFn: (service: string) => api.post('/settings/restart-service', { service }),
   });
 }
 

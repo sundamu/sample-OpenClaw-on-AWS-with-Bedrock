@@ -1,9 +1,11 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import Chart from 'react-apexcharts';
 import type { ApexOptions } from 'apexcharts';
-import { ArrowLeft, Edit3, MessageSquare, Eye, Loader, FolderOpen, RefreshCw } from 'lucide-react';
-import { Card, Badge, Button, PageHeader, StatusDot } from '../../components/ui';
+import { useState } from 'react';
+import { ArrowLeft, Edit3, MessageSquare, Eye, Loader, FolderOpen, RefreshCw, Trash2 } from 'lucide-react';
+import { Card, Badge, Button, PageHeader, StatusDot, Modal } from '../../components/ui';
 import { useAgent, useAgents, usePositions, useBindings, useSessions, useAgentDailyUsage } from '../../hooks/useApi';
+import { api } from '../../api/client';
 import { CHANNEL_LABELS } from '../../types';
 import type { ChannelType } from '../../types';
 
@@ -40,6 +42,8 @@ export default function AgentDetail() {
   const { data: allBindings = [] } = useBindings();
   const { data: allSessions = [] } = useSessions();
   const { data: dailyUsage = [] } = useAgentDailyUsage(agentId || '');
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-20"><Loader size={24} className="animate-spin text-primary" /></div>;
@@ -77,6 +81,7 @@ export default function AgentDetail() {
                 alert('Agent session terminated. Next message will trigger fresh assembly.');
               } catch { alert('Refresh failed'); }
             }}><RefreshCw size={16} /> Refresh</Button>
+            <Button variant="default" onClick={() => setShowDelete(true)}><Trash2 size={16} /> Delete</Button>
           </div>
         }
       />
@@ -229,6 +234,36 @@ export default function AgentDetail() {
             ))}
           </div>
         </Card>
+      )}
+      {showDelete && (
+        <Modal open={true} onClose={() => setShowDelete(false)} title={`Delete Agent — ${agent.name}`}
+          footer={
+            <div className="flex justify-end gap-3">
+              <Button variant="default" onClick={() => setShowDelete(false)}>Cancel</Button>
+              <Button variant="primary" disabled={deleting} onClick={async () => {
+                setDeleting(true);
+                try {
+                  await api.del(`/agents/${agent.id}`);
+                  navigate('/agents');
+                } catch (e: any) {
+                  alert(e?.message || 'Delete failed');
+                  setDeleting(false);
+                }
+              }}>{deleting ? 'Deleting...' : 'Delete Agent'}</Button>
+            </div>
+          }>
+          <p className="text-sm text-text-secondary">
+            This will permanently delete <strong>{agent.name}</strong> and:
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-text-muted list-disc pl-5">
+            <li>Remove all bindings for this agent</li>
+            <li>Clear agentId from the employee record</li>
+            <li>Delete S3 workspace files</li>
+          </ul>
+          <div className="mt-4 rounded-lg bg-danger/10 border border-danger/20 px-3 py-2 text-xs text-danger">
+            This action cannot be undone.
+          </div>
+        </Modal>
       )}
     </div>
   );

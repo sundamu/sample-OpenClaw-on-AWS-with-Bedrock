@@ -280,6 +280,52 @@ def _build_context_block(
     return "\n\n---\n\n".join(parts) if parts else ""
 
 
+# ── Workspace budget enforcement ──────────────────────────────────────────
+from pathlib import Path
+
+WORKSPACE_MAX_MB = 100
+PROTECTED_FILES = {"SOUL.md", "PERSONAL_SOUL.md", "USER.md", "MEMORY.md",
+                   "IDENTITY.md", "AGENTS.md", "TOOLS.md", "HEARTBEAT.md",
+                   "CHANNELS.md", "SESSION_CONTEXT.md"}
+PROTECTED_DIRS = {"memory", "skills", "knowledge"}
+
+
+def _enforce_workspace_budget(workspace: str, max_mb: int = WORKSPACE_MAX_MB):
+    """Clean old user files if workspace exceeds budget.
+    Only cleans files outside protected dirs and protected filenames.
+    Deletes oldest files first until under budget."""
+    ws = Path(workspace)
+    if not ws.exists():
+        return
+
+    user_files = [
+        f for f in ws.rglob("*")
+        if f.is_file()
+        and f.name not in PROTECTED_FILES
+        and not any(p in f.relative_to(ws).parts for p in PROTECTED_DIRS)
+    ]
+    total = sum(f.stat().st_size for f in user_files)
+    if total <= max_mb * 1024 * 1024:
+        return
+
+    logger.info("Workspace budget exceeded: %dMB / %dMB — cleaning old files",
+                total // (1024 * 1024), max_mb)
+    user_files.sort(key=lambda f: f.stat().st_mtime)
+    freed = 0
+    deleted = 0
+    for f in user_files:
+        if total - freed <= max_mb * 1024 * 1024:
+            break
+        sz = f.stat().st_size
+        try:
+            f.unlink()
+            freed += sz
+            deleted += 1
+        except OSError:
+            pass
+    logger.info("Workspace cleanup: freed %dKB, deleted %d files", freed // 1024, deleted)
+
+
 def assemble_workspace(
     s3_client, ssm_client, bucket: str, stack_name: str,
     tenant_id: str, workspace: str, position_override: str = None
@@ -583,6 +629,9 @@ def assemble_workspace(
         logger.info("SESSION_CONTEXT.md written: mode=%s user=%s", prefix or "default", verified_name)
     except Exception as e:
         logger.warning("SESSION_CONTEXT.md generation failed (non-fatal): %s", e)
+
+    # Enforce workspace budget (100MB) — clean old output files if over
+    _enforce_workspace_budget(workspace)
 
     return {
         "merged_soul_chars": len(merged_soul),

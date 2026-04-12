@@ -285,7 +285,7 @@ def ai_analyze(authorization: str = Header(default="")):
 
     try:
         bedrock = _boto3_audit.client("bedrock-runtime", region_name=GATEWAY_REGION)
-        model_id = os.environ.get("BEDROCK_MODEL_ID", "global.amazon.nova-2-lite-v1:0")
+        model_id = os.environ.get("BEDROCK_MODEL_ID", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
         response = bedrock.converse(
             modelId=model_id,
             messages=[{"role": "user", "content": [{"text": prompt}]}],

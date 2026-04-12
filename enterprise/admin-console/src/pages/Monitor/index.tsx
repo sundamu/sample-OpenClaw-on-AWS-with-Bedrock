@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Chart from 'react-apexcharts';
 import type { ApexOptions } from 'apexcharts';
-import { Bot, MessageSquare, Star, AlertTriangle, Shield, RefreshCw, Eye, Radio, Clock, Zap } from 'lucide-react';
+import { Bot, MessageSquare, Star, AlertTriangle, Shield, RefreshCw, Eye, Radio, Clock, Zap, ListChecks, Activity, CheckCircle, XCircle, Users } from 'lucide-react';
 import { Card, StatCard, Badge, Button, PageHeader, Table, StatusDot, Tabs } from '../../components/ui';
-import { useSessions, useAgents, useMonitorHealth, useAlertRules, useRuntimeEvents } from '../../hooks/useApi';
+import { useSessions, useAgents, useMonitorHealth, useAlertRules, useRuntimeEvents, useMonitorActionItems, useMonitorSystemStatus, useMonitorAgentActivity } from '../../hooks/useApi';
 import { CHANNEL_LABELS } from '../../types';
 import type { ChannelType } from '../../types';
 import SessionDetail from './SessionDetail';
@@ -29,11 +29,13 @@ export default function Monitor() {
   const [searchParams] = useSearchParams();
   const { data: healthData, refetch: refetchHealth } = useMonitorHealth();
   const { data: alertRules = [], refetch: refetchAlerts } = useAlertRules();
-  const { data: runtimeData } = useRuntimeEvents(60);
+  const { data: runtimeData } = useRuntimeEvents(1440); // 24 hours
+  const { data: actionItemsData } = useMonitorActionItems();
+  const { data: systemStatusData } = useMonitorSystemStatus();
+  const { data: agentActivityData } = useMonitorAgentActivity();
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('sessions');
 
-  // Deep-link: ?session=<id> from Agent Detail → pre-select that session
   useEffect(() => {
     const sid = searchParams.get('session');
     if (sid) setSelectedSession(sid);
@@ -41,23 +43,23 @@ export default function Monitor() {
 
   const health = healthData?.agents || [];
   const sys = healthData?.system || {};
-  // Use CloudWatch active tenants for "online agents" — reflects real running microVMs
-  const activeAgents = (runtimeData as any)?.summary?.activeTenants ?? AGENTS.filter(a => a.status === 'active').length;
+  const actionItems = actionItemsData?.items || [];
+  const agentActivity = agentActivityData?.agents || [];
+  const activeAgents = agentActivity.filter((a: any) => a.status === 'active').length || AGENTS.filter(a => a.status === 'active').length;
   const totalTurns = sessions.reduce((s, sess) => s + sess.turns, 0);
   const avgQuality = AGENTS.filter(a => a.qualityScore).length > 0
     ? AGENTS.filter(a => a.qualityScore).reduce((s, a) => s + (a.qualityScore || 0), 0) / AGENTS.filter(a => a.qualityScore).length
     : 0;
   const alertCount = alertRules.filter(a => a.status === 'warning').length;
 
-  // Build activity chart from CloudWatch runtime events — 60-minute window, 6×10-min buckets
   const buildChartSeries = () => {
     const events = (runtimeData as any)?.events || [];
     if (events.length === 0) return null;
     const now = Date.now();
-    // 6 buckets of 10 minutes = last 60 minutes
-    const buckets = [5, 4, 3, 2, 1, 0].map(i => {
-      const start = now - (i + 1) * 10 * 60000;
-      const end   = now - i * 10 * 60000;
+    // 12 buckets of 2 hours = 24 hours
+    const buckets = [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0].map(i => {
+      const start = now - (i + 1) * 2 * 3600000;
+      const end   = now - i * 2 * 3600000;
       const inBucket = events.filter((e: any) => {
         const t = new Date(e.timestamp).getTime();
         return t >= start && t < end;
@@ -68,14 +70,11 @@ export default function Monitor() {
         planA:       inBucket.filter((e: any) => e.type === 'plan_a').length,
       };
     });
-    // Return null only if every bucket is completely empty
     const hasAny = buckets.some(b => b.invocations + b.toolCalls + b.planA > 0);
     return hasAny ? buckets : null;
   };
   const chartBuckets = buildChartSeries();
-
-  // x-axis labels for the 60-min chart
-  const chartXLabels = ['50m', '40m', '30m', '20m', '10m', 'now'];
+  const chartXLabels = ['22h', '20h', '18h', '16h', '14h', '12h', '10h', '8h', '6h', '4h', '2h', 'now'];
 
   const elapsed = (startedAt: string) => {
     const mins = Math.floor((Date.now() - new Date(startedAt).getTime()) / 60000);
@@ -89,45 +88,49 @@ export default function Monitor() {
 
   return (
     <div>
-      <PageHeader title="Monitor Center" description="Real-time session monitoring, agent health, performance metrics, and alert management" />
+      <PageHeader title="Monitor Center" description="Real-time session monitoring, agent health, action items, and alert management" />
 
       {/* Top KPIs */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6 mb-6">
         <StatCard title="Live Sessions" value={sessions.length} icon={<Radio size={22} />} color="success" />
-        <StatCard title="Active microVMs" value={activeAgents} icon={<Bot size={22} />} color="primary" />
+        <StatCard title="Active Agents" value={activeAgents} icon={<Bot size={22} />} color="primary" />
         <StatCard title="Total Turns" value={totalTurns} icon={<MessageSquare size={22} />} color="info" />
         <StatCard title="Avg Quality" value={avgQuality > 0 ? avgQuality.toFixed(1) : '—'} icon={<Star size={22} />} color="warning" />
-        <StatCard title="P95 Response" value={sys.p95ResponseSec ? `${sys.p95ResponseSec}s` : '—'} icon={<Clock size={22} />} color="cyan" />
+        <StatCard title="Action Items" value={actionItems.length} icon={<ListChecks size={22} />} color={actionItems.length > 0 ? 'danger' : 'success'} />
         <StatCard title="Alerts" value={alertCount} icon={<AlertTriangle size={22} />} color={alertCount > 0 ? 'danger' : 'success'} />
       </div>
 
       {/* System Health Bar */}
       <div className="grid grid-cols-3 gap-4 mb-6">
-        {[
-          { label: 'Gateway', status: sys.gatewayStatus || 'healthy', detail: 'Port 18789' },
-          { label: 'AgentCore Runtime', status: sys.agentCoreStatus || 'healthy', detail: 'Firecracker microVM' },
-          { label: 'Bedrock API', status: 'connected', detail: `${sys.bedrockLatencyMs || 245}ms latency` },
-        ].map(svc => (
-          <div key={svc.label} className="rounded-lg border border-dark-border bg-dark-card px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className={`w-2.5 h-2.5 rounded-full ${svc.status === 'healthy' || svc.status === 'connected' ? 'bg-green-500 animate-pulse' : 'bg-amber-500'}`} />
-              <div>
-                <p className="text-sm font-medium text-text-primary">{svc.label}</p>
-                <p className="text-xs text-text-muted">{svc.detail}</p>
+        {(() => {
+          const sysStatus = systemStatusData || {};
+          const services = [
+            { label: 'Admin Console', status: (sysStatus as any)?.['admin-console'] || 'healthy', detail: 'Port 8099' },
+            { label: 'Tenant Router', status: (sysStatus as any)?.['tenant-router'] || 'healthy', detail: 'Agent orchestration' },
+            { label: 'Bedrock API', status: (sysStatus as any)?.bedrock || 'connected', detail: `${sys.bedrockLatencyMs || '—'}ms latency` },
+          ];
+          return services.map(svc => (
+            <div key={svc.label} className="rounded-lg border border-dark-border bg-dark-card px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`w-2.5 h-2.5 rounded-full ${svc.status === 'healthy' || svc.status === 'connected' ? 'bg-green-500 animate-pulse' : 'bg-amber-500'}`} />
+                <div>
+                  <p className="text-sm font-medium text-text-primary">{svc.label}</p>
+                  <p className="text-xs text-text-muted">{svc.detail}</p>
+                </div>
               </div>
+              <Badge color={svc.status === 'healthy' || svc.status === 'connected' ? 'success' : 'warning'}>{svc.status}</Badge>
             </div>
-            <Badge color={svc.status === 'healthy' || svc.status === 'connected' ? 'success' : 'warning'}>{svc.status}</Badge>
-          </div>
-        ))}
+          ));
+        })()}
       </div>
 
       {/* Real-time Chart */}
       <Card className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-lg font-semibold text-text-primary">Agent Activity (Last 60 Minutes)</h3>
+            <h3 className="text-lg font-semibold text-text-primary">Agent Activity (Last 24 Hours)</h3>
             <p className="text-sm text-text-secondary">
-              {chartBuckets ? 'Invocations per 10-min window — from CloudWatch Logs' : 'No microVM activity in the last 60 minutes'}
+              {chartBuckets ? 'Invocations from DynamoDB audit events' : 'No activity in the last 24 hours'}
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={() => { refetchSessions(); refetchHealth(); refetchAlerts(); }}><RefreshCw size={14} /> Refresh</Button>
@@ -144,7 +147,7 @@ export default function Monitor() {
           <div className="flex flex-col items-center justify-center h-[220px] text-text-muted">
             <Radio size={32} className="mb-3 opacity-30" />
             <p className="text-sm">No runtime events to display</p>
-            <p className="text-xs mt-1">Activity appears here when employees send messages via Discord, Telegram, or Portal</p>
+            <p className="text-xs mt-1">Activity appears here when employees send messages via IM channels or Portal</p>
           </div>
         )}
       </Card>
@@ -154,6 +157,8 @@ export default function Monitor() {
         <Tabs
           tabs={[
             { id: 'sessions', label: 'Live Sessions', count: sessions.length },
+            { id: 'action-items', label: 'Action Items', count: actionItems.length || undefined },
+            { id: 'agent-activity', label: 'Agent Activity', count: agentActivity.length || undefined },
             { id: 'health', label: 'Agent Health', count: health.length },
             { id: 'alerts', label: 'Alert Rules', count: alertCount || undefined },
             { id: 'runtime', label: 'Runtime Events' },
@@ -181,6 +186,102 @@ export default function Monitor() {
                 ]}
                 data={sessions}
               />
+            </div>
+          )}
+
+          {/* Action Items Tab */}
+          {activeTab === 'action-items' && (
+            <div>
+              <p className="text-sm text-text-secondary mb-4">Aggregated items requiring admin attention: pending reviews, permission denials, budget alerts, and unbound employees.</p>
+              {actionItems.length === 0 ? (
+                <div className="text-center py-12 text-text-muted">
+                  <CheckCircle size={32} className="mx-auto mb-3 text-green-400" />
+                  <p className="text-sm">All clear — no action items</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {actionItems.map((item: any, i: number) => {
+                    const severityColors: Record<string, { bg: string; border: string; text: string }> = {
+                      high: { bg: 'bg-red-500/5', border: 'border-red-500/20', text: 'text-red-400' },
+                      medium: { bg: 'bg-amber-500/5', border: 'border-amber-500/20', text: 'text-amber-400' },
+                      low: { bg: 'bg-blue-500/5', border: 'border-blue-500/20', text: 'text-blue-400' },
+                    };
+                    const sev = severityColors[item.severity] || severityColors.low;
+                    return (
+                      <div key={i} className={`flex items-start gap-3 rounded-lg px-4 py-3 ${sev.bg} border ${sev.border}`}>
+                        {item.severity === 'high' ? <XCircle size={16} className={sev.text} /> :
+                         item.severity === 'medium' ? <AlertTriangle size={16} className={sev.text} /> :
+                         <Zap size={16} className={sev.text} />}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-sm font-medium text-text-primary">{item.title || item.type}</span>
+                            <Badge color={item.severity === 'high' ? 'danger' : item.severity === 'medium' ? 'warning' : 'info'}>{item.severity}</Badge>
+                            {item.category && <Badge>{item.category}</Badge>}
+                          </div>
+                          <p className="text-sm text-text-secondary">{item.description || item.detail}</p>
+                          {item.count && <p className="text-xs text-text-muted mt-1">Count: {item.count}</p>}
+                        </div>
+                        {item.actionUrl && (
+                          <Button variant="ghost" size="sm" onClick={() => navigate(item.actionUrl)}>View</Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Agent Activity Tab */}
+          {activeTab === 'agent-activity' && (
+            <div>
+              <p className="text-sm text-text-secondary mb-4">Real-time agent status: active, idle, and offline agents with last invocation timestamps.</p>
+              {/* Status summary */}
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="rounded-lg bg-dark-bg p-3 text-center">
+                  <p className="text-2xl font-bold text-green-400">{agentActivity.filter((a: any) => a.status === 'active').length}</p>
+                  <p className="text-[10px] text-text-muted uppercase tracking-wider">Active</p>
+                </div>
+                <div className="rounded-lg bg-dark-bg p-3 text-center">
+                  <p className="text-2xl font-bold text-amber-400">{agentActivity.filter((a: any) => a.status === 'idle').length}</p>
+                  <p className="text-[10px] text-text-muted uppercase tracking-wider">Idle</p>
+                </div>
+                <div className="rounded-lg bg-dark-bg p-3 text-center">
+                  <p className="text-2xl font-bold text-text-muted">{agentActivity.filter((a: any) => a.status === 'offline').length}</p>
+                  <p className="text-[10px] text-text-muted uppercase tracking-wider">Offline</p>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                {agentActivity.map((agent: any) => (
+                  <div key={agent.agentId || agent.id} className="flex items-center gap-3 rounded-lg px-4 py-3 hover:bg-dark-hover transition-colors cursor-pointer"
+                    onClick={() => agent.agentId && navigate(`/agents/${agent.agentId}`)}>
+                    <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                      agent.status === 'active' ? 'bg-green-500 animate-pulse' :
+                      agent.status === 'idle' ? 'bg-amber-500' : 'bg-gray-500'
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-text-primary">{agent.agentName || agent.name}</p>
+                      <p className="text-xs text-text-muted">{agent.employeeName} · {agent.positionName}</p>
+                    </div>
+                    <Badge color={agent.status === 'active' ? 'success' : agent.status === 'idle' ? 'warning' : 'default'}>{agent.status}</Badge>
+                    {agent.lastInvocationAt && (
+                      <span className="text-xs text-text-muted shrink-0">
+                        Last: {new Date(agent.lastInvocationAt).toLocaleTimeString()}
+                      </span>
+                    )}
+                    {agent.requestsToday != null && (
+                      <span className="text-xs text-text-muted shrink-0">{agent.requestsToday} req</span>
+                    )}
+                  </div>
+                ))}
+                {agentActivity.length === 0 && (
+                  <div className="text-center py-8 text-text-muted">
+                    <Users size={24} className="mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No agent activity data</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -234,7 +335,7 @@ export default function Monitor() {
                         <td className="py-3">
                           {a.qualityScore ? (
                             <span className={`text-sm font-medium ${a.qualityScore >= 4.5 ? 'text-green-400' : a.qualityScore >= 4.0 ? 'text-blue-400' : 'text-amber-400'}`}>
-                              ⭐ {a.qualityScore}
+                              {a.qualityScore.toFixed(1)}
                             </span>
                           ) : <span className="text-text-muted">—</span>}
                         </td>
@@ -322,21 +423,21 @@ export default function Monitor() {
               </div>
 
               {/* Event timeline */}
-              <p className="text-sm text-text-secondary mb-3">Real-time AgentCore microVM lifecycle events from CloudWatch Logs</p>
+              <p className="text-sm text-text-secondary mb-3">Real-time AgentCore lifecycle events from DynamoDB audit trail</p>
               <div className="space-y-1.5 max-h-[500px] overflow-y-auto">
                 {(runtimeData?.events || []).map((e, i) => {
                   const typeConfig: Record<string, { color: string; icon: string }> = {
                     invocation: { color: 'text-primary', icon: '→' },
                     response: { color: 'text-green-400', icon: '←' },
-                    cold_start: { color: 'text-amber-400', icon: '🔥' },
-                    release: { color: 'text-red-400', icon: '⏹' },
-                    ready: { color: 'text-green-400', icon: '✓' },
-                    sync: { color: 'text-cyan-400', icon: '↻' },
-                    plan_a: { color: 'text-orange-400', icon: '🛡' },
-                    usage: { color: 'text-blue-400', icon: '📊' },
-                    mapping: { color: 'text-purple-400', icon: '🔗' },
+                    cold_start: { color: 'text-amber-400', icon: '!' },
+                    release: { color: 'text-red-400', icon: 'x' },
+                    ready: { color: 'text-green-400', icon: '+' },
+                    sync: { color: 'text-cyan-400', icon: '~' },
+                    plan_a: { color: 'text-orange-400', icon: '#' },
+                    usage: { color: 'text-blue-400', icon: '$' },
+                    mapping: { color: 'text-purple-400', icon: '@' },
                   };
-                  const cfg = typeConfig[e.type] || { color: 'text-text-muted', icon: '·' };
+                  const cfg = typeConfig[e.type] || { color: 'text-text-muted', icon: '.' };
                   return (
                     <div key={i} className="flex items-start gap-2 rounded-lg bg-dark-bg/50 px-3 py-2 text-xs hover:bg-dark-bg transition-colors">
                       <span className={`${cfg.color} font-mono w-4 shrink-0 text-center`}>{cfg.icon}</span>

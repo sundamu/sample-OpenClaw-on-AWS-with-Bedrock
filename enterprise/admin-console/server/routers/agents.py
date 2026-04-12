@@ -488,9 +488,8 @@ def get_all_skill_keys():
 
 @router.post("/api/v1/skills/{skill_name}/assign")
 def assign_skill_to_position(skill_name: str, body: dict, authorization: str = Header(default="")):
-    """Assign a skill to a position. Skills are read from POS#.defaultSkills at runtime
-    by workspace_assembler — no need to propagate to individual AGENT# records."""
-    require_role(authorization, roles=["admin"])
+    """Assign a skill to a position. Triggers config bump + audit + force refresh."""
+    user = require_role(authorization, roles=["admin"])
     position_id = body.get("positionId", "")
     if not position_id:
         raise HTTPException(400, "positionId required")
@@ -508,13 +507,28 @@ def assign_skill_to_position(skill_name: str, body: dict, authorization: str = H
         skills.append(skill_name)
         db.update_position(position_id, {"defaultSkills": skills})
 
-    return {"assigned": True, "positionId": position_id, "skill": skill_name}
+    bump_config_version()
+    db.create_audit_entry({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "eventType": "skill_assignment",
+        "actorId": user.employee_id, "actorName": user.name,
+        "targetType": "position", "targetId": position_id,
+        "detail": f"Assigned skill '{skill_name}' to {pos.get('name', position_id)}",
+        "status": "success",
+    })
+    # Force refresh affected employees in background
+    emps = [e for e in db.get_employees() if e.get("positionId") == position_id]
+    for e in emps:
+        threading.Thread(target=stop_employee_session, args=(e["id"],), daemon=True).start()
+
+    return {"assigned": True, "positionId": position_id, "skill": skill_name,
+            "agentsAffected": len(emps)}
 
 
 @router.delete("/api/v1/skills/{skill_name}/assign")
 def unassign_skill_from_position(skill_name: str, positionId: str = "", authorization: str = Header(default="")):
-    """Remove a skill from a position."""
-    require_role(authorization, roles=["admin"])
+    """Remove a skill from a position. Triggers config bump + audit + force refresh."""
+    user = require_role(authorization, roles=["admin"])
     if not positionId:
         raise HTTPException(400, "positionId query param required")
 
@@ -527,7 +541,44 @@ def unassign_skill_from_position(skill_name: str, positionId: str = "", authoriz
         skills.remove(skill_name)
         db.update_position(positionId, {"defaultSkills": skills})
 
-    return {"unassigned": True, "positionId": positionId, "skill": skill_name}
+    bump_config_version()
+    db.create_audit_entry({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "eventType": "skill_assignment",
+        "actorId": user.employee_id, "actorName": user.name,
+        "targetType": "position", "targetId": positionId,
+        "detail": f"Removed skill '{skill_name}' from {pos.get('name', positionId)}",
+        "status": "success",
+    })
+    emps = [e for e in db.get_employees() if e.get("positionId") == positionId]
+    for e in emps:
+        threading.Thread(target=stop_employee_session, args=(e["id"],), daemon=True).start()
+
+    return {"unassigned": True, "positionId": positionId, "skill": skill_name,
+            "agentsAffected": len(emps)}
+
+
+@router.put("/api/v1/skills/keys/{skill_name}/{env_var}")
+def set_skill_key(skill_name: str, env_var: str, body: dict, authorization: str = Header(default="")):
+    """Configure a platform-level API key for a skill. Stored in SSM SecureString."""
+    user = require_role(authorization, roles=["admin"])
+    value = body.get("value", "")
+    if not value:
+        raise HTTPException(400, "value is required")
+    stack = os.environ.get("STACK_NAME", "openclaw")
+    ssm = boto3.client("ssm", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    ssm.put_parameter(
+        Name=f"/openclaw/{stack}/skill-keys/{skill_name}/{env_var}",
+        Value=value, Type="SecureString", Overwrite=True)
+    db.create_audit_entry({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "eventType": "config_change",
+        "actorId": user.employee_id, "actorName": user.name,
+        "targetType": "skill_key", "targetId": f"{skill_name}/{env_var}",
+        "detail": f"Configured API key {env_var} for skill {skill_name}",
+        "status": "success",
+    })
+    return {"configured": True, "skill": skill_name, "envVar": env_var}
 
 
 # =========================================================================
@@ -607,3 +658,257 @@ def refresh_agent(emp_id: str, authorization: str = Header(default="")):
         "status": "success",
     })
     return {"refreshed": True, "emp_id": emp_id, "detail": result}
+
+
+# =========================================================================
+# Skill Submission + Review (Phase 3)
+# =========================================================================
+
+@router.post("/api/v1/portal/skills/submit")
+def portal_submit_skill(body: dict, authorization: str = Header(default="")):
+    """Employee submits a custom skill for review.
+    Body: { name, description, author, category, skillJson (string), toolJs (string) }
+    Files stored to S3 _pending/skills/{name}/, APPROVAL# created."""
+    user = require_auth(authorization)
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(400, "name is required")
+    if not body.get("toolJs"):
+        raise HTTPException(400, "toolJs (tool implementation code) is required")
+
+    # Build manifest
+    manifest = {
+        "name": name,
+        "version": body.get("version", "1.0.0"),
+        "description": body.get("description", ""),
+        "author": body.get("author", user.name),
+        "layer": 2,
+        "category": body.get("category", "custom"),
+        "scope": "department",
+        "requires": {"env": body.get("requiredEnv", []), "tools": body.get("requiredTools", [])},
+        "permissions": {"allowedRoles": body.get("allowedRoles", ["*"]), "blockedRoles": []},
+        "submittedBy": user.employee_id,
+        "submittedAt": datetime.now(timezone.utc).isoformat(),
+        "status": "under_review",
+    }
+
+    # Write to _pending/ in S3 (isolation area)
+    s3ops.write_file(f"_pending/skills/{name}/skill.json", json.dumps(manifest, indent=2))
+    s3ops.write_file(f"_pending/skills/{name}/tool.js", body["toolJs"])
+    if body.get("setupGuide"):
+        s3ops.write_file(f"_pending/skills/{name}/setup-guide.md", body["setupGuide"])
+
+    # Create approval record
+    approval_id = f"skill-submit-{name}-{int(_time_agents.time())}"
+    db.create_approval({
+        "id": approval_id,
+        "type": "skill_submit",
+        "status": "pending",
+        "skillName": name,
+        "submittedBy": user.employee_id,
+        "submittedByName": user.name,
+        "description": manifest["description"],
+        "category": manifest["category"],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    db.create_audit_entry({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "eventType": "skill_submit",
+        "actorId": user.employee_id, "actorName": user.name,
+        "targetType": "skill", "targetId": name,
+        "detail": f"Submitted skill '{name}' for review",
+        "status": "success",
+    })
+
+    return {"submitted": True, "skillName": name, "approvalId": approval_id}
+
+
+@router.post("/api/v1/portal/skills/{skill_name}/request")
+def portal_request_skill(skill_name: str, body: dict = {}, authorization: str = Header(default="")):
+    """Employee requests access to an approved skill (adds to personalSkills)."""
+    user = require_auth(authorization)
+    reason = body.get("reason", f"Requesting access to skill: {skill_name}")
+
+    # Verify skill exists in catalog
+    manifest = s3ops.read_file(f"_shared/skills/{skill_name}/skill.json")
+    if not manifest:
+        raise HTTPException(404, f"Skill '{skill_name}' not found")
+
+    approval_id = f"skill-req-{user.employee_id}-{skill_name}-{int(_time_agents.time())}"
+    db.create_approval({
+        "id": approval_id,
+        "type": "skill_access_request",
+        "status": "pending",
+        "skillName": skill_name,
+        "employeeId": user.employee_id,
+        "employeeName": user.name,
+        "reason": reason,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    db.create_audit_entry({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "eventType": "skill_access_request",
+        "actorId": user.employee_id, "actorName": user.name,
+        "targetType": "skill", "targetId": skill_name,
+        "detail": f"Requested access to skill '{skill_name}': {reason}",
+        "status": "success",
+    })
+
+    return {"requested": True, "approvalId": approval_id, "skill": skill_name}
+
+
+@router.get("/api/v1/tools-skills/pending")
+def get_pending_skills(authorization: str = Header(default="")):
+    """Admin: list skills pending review from _pending/ in S3."""
+    require_role(authorization, roles=["admin"])
+    files = s3ops.list_files("_pending/skills/")
+    skill_names = set()
+    for f in files:
+        parts = f["name"].split("/")
+        if parts[0]:
+            skill_names.add(parts[0])
+
+    pending = []
+    for name in sorted(skill_names):
+        manifest_content = s3ops.read_file(f"_pending/skills/{name}/skill.json")
+        if manifest_content:
+            try:
+                manifest = json.loads(manifest_content)
+                manifest["id"] = f"pending-{name}"
+                manifest["hasTool"] = bool(s3ops.read_file(f"_pending/skills/{name}/tool.js"))
+                pending.append(manifest)
+            except json.JSONDecodeError:
+                pass
+    return pending
+
+
+@router.post("/api/v1/tools-skills/{skill_name}/review")
+def review_skill(skill_name: str, body: dict, authorization: str = Header(default="")):
+    """Admin approves or rejects a submitted skill.
+    Body: { action: "approve" | "reject", reason?: string }"""
+    user = require_role(authorization, roles=["admin"])
+    action = body.get("action", "")
+    if action not in ("approve", "reject"):
+        raise HTTPException(400, "action must be 'approve' or 'reject'")
+
+    # Read pending manifest
+    manifest_content = s3ops.read_file(f"_pending/skills/{skill_name}/skill.json")
+    if not manifest_content:
+        raise HTTPException(404, f"Pending skill '{skill_name}' not found")
+
+    manifest = json.loads(manifest_content)
+
+    if action == "approve":
+        # Move from _pending/ to _shared/
+        manifest["status"] = "approved"
+        manifest["reviewedBy"] = user.employee_id
+        manifest["reviewedAt"] = datetime.now(timezone.utc).isoformat()
+        manifest["securityScan"] = {"passed": True, "scanner": "manual", "date": datetime.now(timezone.utc).isoformat()}
+
+        s3ops.write_file(f"_shared/skills/{skill_name}/skill.json", json.dumps(manifest, indent=2))
+        # Copy tool.js
+        tool_content = s3ops.read_file(f"_pending/skills/{skill_name}/tool.js")
+        if tool_content:
+            s3ops.write_file(f"_shared/skills/{skill_name}/tool.js", tool_content)
+        # Copy setup-guide.md if exists
+        guide_content = s3ops.read_file(f"_pending/skills/{skill_name}/setup-guide.md")
+        if guide_content:
+            s3ops.write_file(f"_shared/skills/{skill_name}/setup-guide.md", guide_content)
+
+        # Clean up _pending/
+        _s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+        try:
+            objs = _s3.list_objects_v2(Bucket=s3ops.bucket(), Prefix=f"_pending/skills/{skill_name}/")
+            for obj in objs.get("Contents", []):
+                _s3.delete_object(Bucket=s3ops.bucket(), Key=obj["Key"])
+        except Exception:
+            pass
+
+    # Update approval record
+    approvals = db.get_approvals()
+    for a in approvals:
+        if a.get("skillName") == skill_name and a.get("type") == "skill_submit" and a.get("status") == "pending":
+            db.update_approval(a["id"], {
+                "status": "approved" if action == "approve" else "rejected",
+                "reviewedBy": user.employee_id,
+                "reviewedByName": user.name,
+                "reviewedAt": datetime.now(timezone.utc).isoformat(),
+                "reviewReason": body.get("reason", ""),
+            })
+            break
+
+    db.create_audit_entry({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "eventType": "skill_review",
+        "actorId": user.employee_id, "actorName": user.name,
+        "targetType": "skill", "targetId": skill_name,
+        "detail": f"{'Approved' if action == 'approve' else 'Rejected'} skill '{skill_name}'" + (f": {body.get('reason','')}" if body.get('reason') else ""),
+        "status": "success",
+    })
+
+    return {"action": action, "skill": skill_name}
+
+
+@router.post("/api/v1/tools-skills/{skill_name}/approve-install")
+def approve_skill_install(skill_name: str, body: dict, authorization: str = Header(default="")):
+    """Admin approves employee's skill access request → adds to EMP#.personalSkills."""
+    user = require_role(authorization, roles=["admin"])
+    approval_id = body.get("approvalId", "")
+    if not approval_id:
+        raise HTTPException(400, "approvalId required")
+
+    approval = db.get_approval(approval_id)
+    if not approval:
+        raise HTTPException(404, "Approval not found")
+
+    emp_id = approval.get("employeeId", "")
+    emp = db.get_employee(emp_id)
+    if not emp:
+        raise HTTPException(404, f"Employee {emp_id} not found")
+
+    # Add to personalSkills
+    personal = emp.get("personalSkills", [])
+    if skill_name not in personal:
+        personal.append(skill_name)
+        db.update_employee(emp_id, {"personalSkills": personal})
+
+    # Update approval
+    db.update_approval(approval_id, {
+        "status": "approved",
+        "reviewedBy": user.employee_id,
+        "reviewedByName": user.name,
+        "reviewedAt": datetime.now(timezone.utc).isoformat(),
+    })
+
+    # Force refresh employee agent
+    threading.Thread(target=stop_employee_session, args=(emp_id,), daemon=True).start()
+
+    db.create_audit_entry({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "eventType": "skill_install_approved",
+        "actorId": user.employee_id, "actorName": user.name,
+        "targetType": "employee_skill", "targetId": f"{emp_id}/{skill_name}",
+        "detail": f"Approved skill '{skill_name}' for {emp.get('name', emp_id)}",
+        "status": "success",
+    })
+
+    return {"approved": True, "employee": emp_id, "skill": skill_name}
+
+
+@router.get("/api/v1/tools-skills/{skill_name}/code")
+def get_skill_code(skill_name: str, source: str = "shared", authorization: str = Header(default="")):
+    """Read skill tool.js code for review. source=shared or pending."""
+    require_role(authorization, roles=["admin"])
+    prefix = "_shared" if source == "shared" else "_pending"
+    content = s3ops.read_file(f"{prefix}/skills/{skill_name}/tool.js")
+    manifest = s3ops.read_file(f"{prefix}/skills/{skill_name}/skill.json")
+    guide = s3ops.read_file(f"{prefix}/skills/{skill_name}/setup-guide.md")
+    return {
+        "skill": skill_name,
+        "source": source,
+        "toolJs": content or "",
+        "manifest": json.loads(manifest) if manifest else None,
+        "setupGuide": guide or "",
+    }

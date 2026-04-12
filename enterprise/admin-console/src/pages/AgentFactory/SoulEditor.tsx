@@ -69,12 +69,22 @@ export default function SoulEditor() {
     return parts.join('\n\n---\n\n') || 'No content to merge.';
   }, [globalContent, positionContent, personalContent]);
 
+  const [saveError, setSaveError] = useState('');
+
   const handleSave = () => {
     if (!agentId) return;
+    setSaveError('');
     const layer = activeTab === 'global' ? 'global' : activeTab;
     const content = layer === 'position' ? positionContent : personalContent;
     saveSoul.mutate({ agentId, layer, content }, {
       onSuccess: () => { setSaved(true); setTimeout(() => setSaved(false), 2000); },
+      onError: (err: any) => {
+        if (err?.response?.status === 409 || err?.status === 409) {
+          setSaveError('Version conflict: someone else edited this SOUL. Please refresh and try again.');
+        } else {
+          setSaveError(err?.message || 'Save failed');
+        }
+      },
     });
   };
 
@@ -93,6 +103,14 @@ export default function SoulEditor() {
           </div>
         }
       />
+
+      {saveError && (
+        <div className="mb-4 rounded-xl bg-danger/10 border border-danger/20 px-4 py-3 flex items-center gap-2">
+          <AlertTriangle size={16} className="text-danger shrink-0" />
+          <p className="text-sm text-danger">{saveError}</p>
+          <button onClick={() => setSaveError('')} className="ml-auto text-danger hover:text-danger/70 text-xs">Dismiss</button>
+        </div>
+      )}
 
       {/* Agent info bar */}
       <Card className="mb-6">

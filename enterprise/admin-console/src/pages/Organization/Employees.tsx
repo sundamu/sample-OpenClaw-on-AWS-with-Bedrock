@@ -74,10 +74,12 @@ export default function Employees() {
   const bound = EMPLOYEES.filter(e => e.agentId).length;
   const unbound = EMPLOYEES.length - bound;
   const totalMessages = activityList.reduce((s, a) => s + (a.messagesThisWeek || 0), 0);
-  const onlineNow = activityList.filter(a => {
-    const cs = a.channelStatus || {};
-    return Object.values(cs).some(s => s === 'online');
-  }).length;
+  // Active agents: based on agent status (active = invoked within 15 min)
+  const onlineNow = AGENTS.filter(a => a.status === 'active').length
+    || activityList.filter(a => {
+      const cs = a.channelStatus || {};
+      return Object.values(cs).some(s => s === 'online');
+    }).length;
 
   const filtered = EMPLOYEES.filter(e => {
     if (filterText && !e.name.toLowerCase().includes(filterText.toLowerCase()) && !e.positionName.toLowerCase().includes(filterText.toLowerCase())) return false;

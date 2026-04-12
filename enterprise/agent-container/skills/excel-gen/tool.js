@@ -38,7 +38,10 @@ if (!args.sheets || !Array.isArray(args.sheets) || args.sheets.length === 0) {
 }
 
 const filename   = args.filename   || `report-${Date.now()}.xlsx`;
-const outputPath = args.outputPath || path.join(os.tmpdir(), filename);
+const workspace  = process.env.OPENCLAW_WORKSPACE || '/root/.openclaw/workspace';
+const outputDir  = path.join(workspace, 'output');
+fs.mkdirSync(outputDir, { recursive: true });
+const outputPath = args.outputPath || path.join(outputDir, filename);
 
 // Build Python script as a string, pass data via temp JSON file
 const dataFile = path.join(os.tmpdir(), `excel-data-${Date.now()}.json`);

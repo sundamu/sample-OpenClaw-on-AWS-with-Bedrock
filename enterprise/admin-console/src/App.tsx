@@ -15,7 +15,8 @@ import Employees from './pages/Organization/Employees';
 import AgentList from './pages/AgentFactory/AgentList';
 import AgentDetail from './pages/AgentFactory/AgentDetail';
 import SoulEditor from './pages/AgentFactory/SoulEditor';
-import SkillCatalog from './pages/Skills/SkillCatalog';
+import ToolsSkills from './pages/ToolsSkills';
+import ToolsSkillsDetail from './pages/ToolsSkills/Detail';
 import Bindings from './pages/Bindings';
 import IMChannels from './pages/IMChannels';
 import Monitor from './pages/Monitor/index';
@@ -75,7 +76,8 @@ function AppRoutes() {
       <Route path="/agents/:agentId" element={user && user.role !== 'employee' ? <Layout><AgentDetail /></Layout> : <Navigate to="/login" replace />} />
       <Route path="/agents/:agentId/soul" element={user && user.role !== 'employee' ? <Layout><SoulEditor /></Layout> : <Navigate to="/login" replace />} />
       <Route path="/workspace" element={user && user.role !== 'employee' ? <Layout><Workspace /></Layout> : <Navigate to="/login" replace />} />
-      <Route path="/skills" element={user && user.role !== 'employee' ? <Layout><SkillCatalog /></Layout> : <Navigate to="/login" replace />} />
+      <Route path="/skills" element={user && user.role !== 'employee' ? <Layout><ToolsSkills /></Layout> : <Navigate to="/login" replace />} />
+      <Route path="/skills/:itemId" element={user && user.role !== 'employee' ? <Layout><ToolsSkillsDetail /></Layout> : <Navigate to="/login" replace />} />
       <Route path="/knowledge" element={user && user.role !== 'employee' ? <Layout><KnowledgeBase /></Layout> : <Navigate to="/login" replace />} />
       <Route path="/bindings" element={user && user.role !== 'employee' ? <Layout><Bindings /></Layout> : <Navigate to="/login" replace />} />
       <Route path="/channels" element={user && user.role !== 'employee' ? <Layout><IMChannels /></Layout> : <Navigate to="/login" replace />} />

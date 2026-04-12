@@ -20,6 +20,7 @@ import os
 import re
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from typing import Optional
 
 import boto3
@@ -616,7 +617,10 @@ def main():
             STACK_NAME,
         )
 
-    server = HTTPServer(("0.0.0.0", ROUTER_PORT), TenantRouterHandler)
+    class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True  # threads die when main thread exits
+
+    server = ThreadedHTTPServer(("0.0.0.0", ROUTER_PORT), TenantRouterHandler)
     logger.info(
         "Tenant Router listening on port %d (stack=%s, runtime=%s)",
         ROUTER_PORT, STACK_NAME, RUNTIME_ID or "NOT_SET",

@@ -209,7 +209,11 @@ export default function Positions() {
   const deptOptions = DEPARTMENTS.filter(d => !d.parentId).map(d => ({ label: d.name, value: d.id }));
   const totalMembers = POSITIONS.reduce((s, p) => s + (p.memberCount || 0), 0);
   const totalUnbound = EMPLOYEES.filter(e => !e.agentId).length;
-  const emptySoulCount = POSITIONS.filter(p => !p.soulTemplate?.trim()).length;
+  // SOUL files are now in S3, not in DynamoDB soulTemplate field.
+  // A position is "configured" if it has a toolAllowlist (Plan A set up in Security Center).
+  // Every position with a SOUL file in S3 is considered configured.
+  const configuredCount = POSITIONS.filter(p => p.toolAllowlist?.length > 0 || p.soulTemplate?.trim()).length;
+  const emptySoulCount = POSITIONS.length - configuredCount;
 
   const getProvisionStats = (posId: string) => {
     const posEmps = EMPLOYEES.filter(e => e.positionId === posId);

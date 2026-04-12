@@ -32,17 +32,61 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
-def get_tenant_roles(ssm, stack_name, tenant_id):
-    """Read tenant's role list from SSM permission profile."""
+def get_tenant_roles(stack_name, tenant_id, region=None):
+    """Get tenant's roles from DynamoDB position/department data.
+    Maps: tenant_id → emp_id → EMP# record → departmentName → role list.
+    Returns list of role strings for skill permission filtering."""
+    ddb_region = region or os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
+    ddb_table = os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw"))
+
+    # Strip Tenant Router prefix: channel__emp_id__hash → emp_id
+    base_id = tenant_id
+    parts = base_id.split("__")
+    if len(parts) >= 2:
+        base_id = parts[1]
+
     try:
-        resp = ssm.get_parameter(
-            Name=f"/openclaw/{stack_name}/tenants/{tenant_id}/roles"
-        )
-        roles = [r.strip() for r in resp["Parameter"]["Value"].split(",")]
-        logger.info("Tenant %s roles: %s", tenant_id, roles)
-        return roles
-    except ClientError:
-        logger.info("No roles found for tenant %s, using default: [employee]", tenant_id)
+        ddb = boto3.resource("dynamodb", region_name=ddb_region)
+        table = ddb.Table(ddb_table)
+
+        resp = table.get_item(Key={"PK": "ORG#acme", "SK": f"EMP#{base_id}"})
+        emp = resp.get("Item", {})
+        if not emp:
+            logger.info("Employee %s not found, using default roles", base_id)
+            return ["employee"]
+
+        dept_name = emp.get("departmentName", "")
+        role = emp.get("role", "employee")
+
+        roles = [role, "employee"]
+        if dept_name:
+            dept_lower = dept_name.lower().replace(" & ", "_").replace(" ", "_")
+            roles.append(dept_lower)
+            DEPT_ALIASES = {
+                "engineering": ["engineering", "devops", "qa"],
+                "platform team": ["engineering", "devops"],
+                "frontend team": ["engineering"],
+                "backend team": ["engineering"],
+                "qa team": ["engineering", "qa"],
+                "enterprise sales": ["sales"],
+                "smb sales": ["sales"],
+                "customer success": ["csm"],
+                "hr & admin": ["hr"],
+                "legal & compliance": ["legal"],
+                "product": ["product"],
+                "finance": ["finance"],
+            }
+            for alias in DEPT_ALIASES.get(dept_name.lower(), []):
+                if alias not in roles:
+                    roles.append(alias)
+
+        if role == "admin":
+            roles.append("management")
+
+        logger.info("Tenant %s (%s) roles: %s", base_id, dept_name, list(set(roles)))
+        return list(set(roles))
+    except Exception as e:
+        logger.warning("DynamoDB role resolution failed: %s — using default", e)
         return ["employee"]
 
 
@@ -134,6 +178,53 @@ def load_layer2_skills(s3, bucket, stack_name, tenant_id, tenant_roles, workspac
         )
     except Exception as e:
         logger.warning("Failed to sync tenant skills: %s", e)
+
+    return loaded
+
+
+def load_personal_skills(s3, bucket, tenant_id, workspace, region=None):
+    """Load employee's personalSkills from DynamoDB → pull from S3.
+    These bypass role permission checks — admin already approved them."""
+    ddb_region = region or os.environ.get("DYNAMODB_REGION", os.environ.get("AWS_REGION", "us-east-1"))
+    ddb_table = os.environ.get("DYNAMODB_TABLE", os.environ.get("STACK_NAME", "openclaw"))
+
+    base_id = tenant_id
+    parts = base_id.split("__")
+    if len(parts) >= 2:
+        base_id = parts[1]
+
+    try:
+        ddb = boto3.resource("dynamodb", region_name=ddb_region)
+        table = ddb.Table(ddb_table)
+        resp = table.get_item(Key={"PK": "ORG#acme", "SK": f"EMP#{base_id}"})
+        emp = resp.get("Item", {})
+        personal = emp.get("personalSkills", [])
+        if not personal:
+            return []
+    except Exception as e:
+        logger.warning("Failed to read personalSkills: %s", e)
+        return []
+
+    skills_dir = os.path.join(workspace, "skills")
+    os.makedirs(skills_dir, exist_ok=True)
+    loaded = []
+
+    for skill_name in personal:
+        dest = os.path.join(skills_dir, skill_name)
+        if os.path.exists(dest):
+            continue
+        try:
+            subprocess.run(
+                ["aws", "s3", "sync",
+                 f"s3://{bucket}/_shared/skills/{skill_name}/", f"{dest}/",
+                 "--quiet"],
+                capture_output=True, text=True, timeout=15
+            )
+            if os.path.isdir(dest):
+                loaded.append(skill_name)
+                logger.info("Personal skill loaded: %s", skill_name)
+        except Exception as e:
+            logger.warning("Failed to load personal skill %s: %s", skill_name, e)
 
     return loaded
 
@@ -255,12 +346,16 @@ def main():
 
     logger.info("=== Skill Loader START tenant=%s ===", args.tenant)
 
-    # Get tenant roles for permission filtering
-    roles = get_tenant_roles(ssm, args.stack, args.tenant)
+    # Get tenant roles for permission filtering (reads DynamoDB, not SSM)
+    roles = get_tenant_roles(args.stack, args.tenant, region=args.region)
 
     # Layer 2: S3 hot-load skills
     l2 = load_layer2_skills(s3, args.bucket, args.stack, args.tenant, roles, args.workspace)
     logger.info("Layer 2 loaded: %s", l2 if l2 else "none")
+
+    # Personal skills (employee-specific, admin-approved)
+    personal = load_personal_skills(s3, args.bucket, args.tenant, args.workspace, region=args.region)
+    logger.info("Personal skills loaded: %s", personal if personal else "none")
 
     # Layer 3: Pre-built skill bundles
     l3 = load_layer3_bundles(s3, ssm, args.bucket, args.stack, args.workspace)

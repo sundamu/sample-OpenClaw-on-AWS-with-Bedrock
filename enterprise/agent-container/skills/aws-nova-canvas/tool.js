@@ -29,7 +29,10 @@ const width      = args.width   || 1024;
 const height     = args.height  || 1024;
 const quality    = args.quality || 'standard';
 const region     = process.env.AWS_REGION || 'us-east-1';
-const outputPath = args.outputPath || path.join(os.tmpdir(), `nova-canvas-${Date.now()}.png`);
+const workspace  = process.env.OPENCLAW_WORKSPACE || '/root/.openclaw/workspace';
+const outputDir  = path.join(workspace, 'output');
+fs.mkdirSync(outputDir, { recursive: true });
+const outputPath = args.outputPath || path.join(outputDir, `nova-canvas-${Date.now()}.png`);
 
 const payload = {
   taskType: 'TEXT_IMAGE',

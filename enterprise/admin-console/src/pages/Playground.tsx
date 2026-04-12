@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Send, User, Bot, Shield, Eye, Terminal, Loader, FileText, ChevronDown, ChevronRight, Save, RefreshCw, Trash2 } from 'lucide-react';
+import { Send, User, Bot, Eye, Terminal, Loader, FileText, ChevronDown, ChevronRight, Save, RefreshCw, Trash2, Activity } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Card, Badge, Button, PageHeader, Select, Tabs } from '../components/ui';
-import { usePlaygroundProfiles, useAgents, useEmployees, usePositions, useWorkspaceFile, useSaveWorkspaceFile } from '../hooks/useApi';
+import { usePlaygroundProfiles, useAgents, useEmployees, usePositions, useWorkspaceFile, useSaveWorkspaceFile, usePlaygroundPipeline, usePlaygroundEvents } from '../hooks/useApi';
 import { api } from '../api/client';
 
 const STORAGE_KEY = 'openclaw_playground_chat';
@@ -18,7 +18,7 @@ function saveMessages(tenantId: string, messages: ChatMessage[]) {
   localStorage.setItem(`${STORAGE_KEY}_${tenantId}`, JSON.stringify(messages));
 }
 
-interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; timestamp: string; }
+interface ChatMessage { role: 'user' | 'assistant' | 'system' | 'admin'; content: string; timestamp: string; source?: string; }
 
 // ── File viewer card ────────────────────────────────────────────────────────
 interface FileCardProps {
@@ -50,10 +50,7 @@ function FileCard({ label, s3Key, editable = false, badge, badgeColor = 'default
 
   return (
     <div className="rounded-xl border border-dark-border/60 overflow-hidden">
-      <button
-        className="w-full flex items-center justify-between px-4 py-2.5 bg-dark-bg hover:bg-dark-hover transition-colors"
-        onClick={() => setOpen(o => !o)}
-      >
+      <button className="w-full flex items-center justify-between px-4 py-2.5 bg-dark-bg hover:bg-dark-hover transition-colors" onClick={() => setOpen(o => !o)}>
         <div className="flex items-center gap-2.5">
           <FileText size={14} className="text-text-muted" />
           <span className="text-sm font-medium text-text-primary">{label}</span>
@@ -78,9 +75,9 @@ function FileCard({ label, s3Key, editable = false, badge, badgeColor = 'default
                     <button onClick={() => refetch()} className="rounded p-1 text-text-muted hover:text-text-primary hover:bg-dark-hover transition-colors"><RefreshCw size={12} /></button>
                     {editing ? (
                       <>
-                        <Button variant="ghost" size="sm" onClick={() => { setEditing(false); setDraft(data.content); }}>取消</Button>
+                        <Button variant="ghost" size="sm" onClick={() => { setEditing(false); setDraft(data.content); }}>Cancel</Button>
                         <Button variant="primary" size="sm" onClick={handleSave} disabled={saveFile.isPending}>
-                          <Save size={12} /> {saveFile.isPending ? '保存中...' : saved ? '已保存 ✓' : '保存'}
+                          <Save size={12} /> {saveFile.isPending ? 'Saving...' : saved ? 'Saved' : 'Save'}
                         </Button>
                       </>
                     ) : (
@@ -96,12 +93,8 @@ function FileCard({ label, s3Key, editable = false, badge, badgeColor = 'default
                 </div>
               )}
               {editing ? (
-                <textarea
-                  value={draft}
-                  onChange={e => setDraft(e.target.value)}
-                  rows={14}
-                  className="w-full bg-dark-bg px-4 py-3 text-xs text-text-primary font-mono focus:outline-none resize-none"
-                />
+                <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={14}
+                  className="w-full bg-dark-bg px-4 py-3 text-xs text-text-primary font-mono focus:outline-none resize-none" />
               ) : (
                 <pre className="px-4 py-3 text-xs text-text-secondary font-mono whitespace-pre-wrap overflow-x-auto max-h-72 overflow-y-auto bg-dark-bg">
                   {data.content || '(empty)'}
@@ -109,7 +102,7 @@ function FileCard({ label, s3Key, editable = false, badge, badgeColor = 'default
               )}
             </div>
           ) : (
-            <p className="px-4 py-4 text-xs text-text-muted">(文件不存在或为空)</p>
+            <p className="px-4 py-4 text-xs text-text-muted">(File not found or empty)</p>
           )}
         </div>
       )}
@@ -120,7 +113,7 @@ function FileCard({ label, s3Key, editable = false, badge, badgeColor = 'default
 // ── Main Playground ─────────────────────────────────────────────────────────
 export default function Playground() {
   const [searchParams] = useSearchParams();
-  const agentParam = searchParams.get('agent'); // e.g. "agent-ae-mike"
+  const agentParam = searchParams.get('agent');
   const { data: profiles } = usePlaygroundProfiles();
   const { data: employees = [] } = useEmployees();
   const { data: positions = [] } = usePositions();
@@ -143,13 +136,22 @@ export default function Playground() {
   const [inputValue, setInputValue] = useState('');
   const [lastPlanE, setLastPlanE] = useState('No messages yet');
   const [sending, setSending] = useState(false);
+  const mode = 'live' as const;  // Only Live mode — Admin tests real AgentCore behavior
   const [activeTab, setActiveTab] = useState('pipeline');
   const [tenantReady, setTenantReady] = useState(false);
+
+  const empId = tenantId.replace('port__', '');
+  const emp = employees.find(e => e.id === empId);
+  const posId = emp?.positionId || '';
+
+  // Pipeline config from new API
+  const { data: pipelineData, refetch: refetchPipeline } = usePlaygroundPipeline(empId);
+  // Events from new API
+  const { data: eventsData } = usePlaygroundEvents(tenantId, 300);
 
   useEffect(() => {
     if (tenantOptions.length === 0) return;
     if (tenantId) return;
-    // Pre-select from ?agent= query param if present
     if (agentParam) {
       const matched = tenantOptions.find(o => o.value.includes(agentParam) ||
         employees.find(e => e.agentId === agentParam && o.value === `port__${e.id}`));
@@ -173,18 +175,13 @@ export default function Playground() {
       const p = profiles?.[tenantId];
       setMessages([{
         role: 'system',
-        content: `🔒 Tenant loaded: ${label} — ${p?.role || '?'} role, ${p?.tools?.length || 0} tools`,
+        content: `Testing as ${label} — ${p?.tools?.length || 0} tools enabled`,
         timestamp: '',
       }]);
     }
     setLastPlanE('No messages yet');
     setTimeout(() => setTenantReady(true), 100);
   }, [tenantId, profiles]);
-
-  // Derive employee ID and position ID for file panel
-  const empId = tenantId.replace('port__', '');
-  const emp = employees.find(e => e.id === empId);
-  const posId = emp?.positionId || '';
 
   const handleSend = async () => {
     if (!inputValue.trim() || sending) return;
@@ -195,28 +192,48 @@ export default function Playground() {
     setSending(true);
 
     try {
-      const data = await api.post<{ response: string; plan_e: string }>(
-        '/playground/send', { tenant_id: tenantId, message: msg, mode: 'live' }
+      const data = await api.post<{ response: string; plan_e: string; source?: string }>(
+        '/playground/send', { tenant_id: tenantId, message: msg, mode }
       );
-      setMessages(prev => [...prev, { role: 'assistant', content: data.response, timestamp: new Date().toLocaleTimeString() }]);
-      setLastPlanE(data.plan_e || '✅ PASS');
-    } catch {
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: '⏳ Agent cold-starting (~25s). Retrying...',
+        content: data.response,
         timestamp: new Date().toLocaleTimeString(),
+        source: data.source,
       }]);
-      try {
-        await new Promise(r => setTimeout(r, 6000));
-        const retry = await api.post<{ response: string; plan_e: string }>(
-          '/playground/send', { tenant_id: tenantId, message: msg, mode: 'live' }
-        );
-        setMessages(prev => [...prev, { role: 'assistant', content: retry.response, timestamp: new Date().toLocaleTimeString() }]);
-        setLastPlanE(retry.plan_e || '✅ PASS');
-      } catch {
+      setLastPlanE(data.plan_e || 'PASS');
+    } catch (err: any) {
+      const errMsg = err?.message || err?.response?.data?.error || '';
+      if (errMsg.includes('502') || errMsg.includes('timeout') || errMsg.includes('Failed to fetch')) {
+        // AgentCore cold start or long-running task — show status and retry with longer wait
         setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: 'Agent still starting. Please retry in ~30s.',
+          role: 'system',
+          content: 'Agent is starting up or processing a complex task. Waiting...',
+          timestamp: new Date().toLocaleTimeString(),
+        }]);
+        try {
+          await new Promise(r => setTimeout(r, 15000));
+          const retry = await api.post<{ response: string; plan_e: string; source?: string }>(
+            '/playground/send', { tenant_id: tenantId, message: msg, mode }
+          );
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: retry.response,
+            timestamp: new Date().toLocaleTimeString(),
+            source: retry.source,
+          }]);
+          setLastPlanE(retry.plan_e || 'PASS');
+        } catch {
+          setMessages(prev => [...prev, {
+            role: 'system',
+            content: 'Agent is still starting. This happens on first use or after config changes. Please wait 30 seconds and try again.',
+            timestamp: new Date().toLocaleTimeString(),
+          }]);
+        }
+      } else {
+        setMessages(prev => [...prev, {
+          role: 'system',
+          content: `Error: ${errMsg || 'Request failed. Please try again.'}`,
           timestamp: new Date().toLocaleTimeString(),
         }]);
       }
@@ -225,19 +242,31 @@ export default function Playground() {
     }
   };
 
+  // Mode removed — always Live for real AgentCore testing
+
   return (
     <div>
-      <PageHeader title="Agent Playground" description="Test agent behavior, inspect pipeline permissions, and read/write employee config files" />
+      <PageHeader title="Agent Playground" description="Test employee agents with real AgentCore invocation — verify SOUL rules, tool permissions, and security constraints"
+        actions={
+          <Button variant="default" onClick={async () => {
+            try {
+              const r = await api.post<{ refreshed: number }>('/admin/refresh-all', {});
+              alert(`All ${(r as any).refreshed || 0} agent sessions terminated. Next message will cold-start with latest config.`);
+            } catch { alert('Refresh failed'); }
+          }}><RefreshCw size={16} /> Force Refresh All Sessions</Button>
+        }
+      />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* ── Left: Chat ── */}
         <Card>
           <div className="mb-4">
             <Select label="Tenant Context" value={tenantId} onChange={v => setTenantId(v)} options={tenantOptions} />
+
             <div className="mt-2 flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-success animate-pulse" />
-              <span className="text-xs text-success font-medium">Live · AgentCore</span>
-              <span className="text-xs text-text-muted">{tenantId}</span>
+              <span className="h-2 w-2 rounded-full animate-pulse bg-success" />
+              <Badge color="success">Live</Badge>
+              <span className="text-xs text-text-muted">Real AgentCore — tests actual tool permissions and security rules</span>
             </div>
           </div>
 
@@ -250,10 +279,13 @@ export default function Playground() {
                   : 'bg-dark-card border border-dark-border text-text-primary'
                 }`}>
                   <div className="flex items-center gap-1.5 mb-1">
-                    {msg.role === 'system' ? <Terminal size={12} /> : msg.role === 'user' ? <User size={12} /> : <Bot size={12} />}
+                    {msg.role === 'system' ? <Terminal size={12} /> :
+                     msg.role === 'user' ? <User size={12} /> :
+                     <Bot size={12} />}
                     <span className="text-xs text-text-muted">
                       {msg.role === 'system' ? 'System' : msg.role === 'user' ? 'You' : 'Agent'}
                       {msg.timestamp && ` · ${msg.timestamp}`}
+                      {msg.source && ` · ${msg.source}`}
                     </span>
                   </div>
                   {msg.role === 'assistant' ? (
@@ -280,26 +312,27 @@ export default function Playground() {
               value={inputValue}
               onChange={e => setInputValue(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !sending) handleSend(); }}
-              placeholder="Send a message to the agent..."
+              placeholder="Send a message to test this employee's agent..."
               className="flex-1 rounded-xl border border-dark-border bg-dark-bg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:outline-none"
             />
             <Button variant="default" onClick={() => {
               if (tenantId) localStorage.removeItem(`${STORAGE_KEY}_${tenantId}`);
               const label = tenantOptions.find(o => o.value === tenantId)?.label || tenantId;
               const p = profiles?.[tenantId];
-              setMessages([{ role: 'system', content: `🔒 Tenant loaded: ${label} — ${p?.role || '?'} role, ${p?.tools?.length || 0} tools`, timestamp: '' }]);
+              setMessages([{ role: 'system', content: `Testing as ${label} — ${p?.tools?.length || 0} tools enabled`, timestamp: '' }]);
               setLastPlanE('No messages yet');
             }}><Trash2 size={16} /></Button>
             <Button variant="primary" onClick={handleSend} disabled={sending}><Send size={16} /></Button>
           </div>
         </Card>
 
-        {/* ── Right: Inspector + Files ── */}
+        {/* ── Right: Inspector ── */}
         <div className="space-y-4">
           <Card>
             <Tabs
               tabs={[
-                { id: 'pipeline', label: 'Pipeline' },
+                { id: 'pipeline', label: 'Pipeline Config' },
+                { id: 'events', label: 'Audit Events', count: eventsData?.count || undefined },
                 { id: 'files', label: 'Employee Files' },
               ]}
               activeTab={activeTab}
@@ -309,33 +342,124 @@ export default function Playground() {
             <div className="mt-4">
               {activeTab === 'pipeline' && (
                 <div className="space-y-4">
-                  <div>
-                    <p className="text-xs text-text-muted mb-1">Tenant ID</p>
-                    <code className="text-sm text-primary-light bg-primary/5 px-2 py-1 rounded">{tenantId}</code>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-text-muted">Runtime pipeline for {empId}</p>
+                    <Button variant="ghost" size="sm" onClick={() => refetchPipeline()}><RefreshCw size={12} /> Refresh</Button>
                   </div>
-                  <div>
-                    <p className="text-xs text-text-muted mb-2">Permission Profile</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      <Badge color="primary">{profile.role}</Badge>
-                      {profile.tools.map(t => <Badge key={t} color="success">{t}</Badge>)}
+
+                  {pipelineData ? (
+                    <>
+                      {/* SOUL info */}
+                      <div>
+                        <p className="text-xs text-text-muted mb-2">SOUL Layers</p>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="rounded-lg bg-dark-bg p-2.5 text-center">
+                            <p className="text-lg font-bold text-text-primary">{pipelineData.soul?.globalWords || 0}</p>
+                            <p className="text-[10px] text-text-muted">Global words</p>
+                          </div>
+                          <div className="rounded-lg bg-dark-bg p-2.5 text-center">
+                            <p className="text-lg font-bold text-text-primary">{pipelineData.soul?.positionWords || 0}</p>
+                            <p className="text-[10px] text-text-muted">Position words</p>
+                          </div>
+                          <div className="rounded-lg bg-dark-bg p-2.5 text-center">
+                            <p className="text-lg font-bold text-text-primary">{pipelineData.soul?.personalWords || 0}</p>
+                            <p className="text-[10px] text-text-muted">Personal words</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Model */}
+                      <div>
+                        <p className="text-xs text-text-muted mb-1">Model</p>
+                        <code className="text-sm text-primary-light bg-primary/5 px-2 py-1 rounded">{pipelineData.model || '—'}</code>
+                      </div>
+
+                      {/* Plan A Tools */}
+                      <div>
+                        <p className="text-xs text-text-muted mb-2">Plan A — Allowed Tools ({pipelineData.planA?.tools?.length || 0})</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(pipelineData.planA?.tools || []).map((t: string) => <Badge key={t} color="success">{t}</Badge>)}
+                        </div>
+                      </div>
+
+                      {/* Knowledge Bases */}
+                      {pipelineData.knowledgeBases && pipelineData.knowledgeBases.length > 0 && (
+                        <div>
+                          <p className="text-xs text-text-muted mb-2">Knowledge Bases</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {pipelineData.knowledgeBases.map((kb: any) => <Badge key={kb.id || kb} color="info">{kb.name || kb}</Badge>)}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Runtime */}
+                      {pipelineData.runtime && (
+                        <div>
+                          <p className="text-xs text-text-muted mb-1">Runtime</p>
+                          <div className="rounded-lg bg-dark-bg p-2.5 text-xs text-text-secondary font-mono">
+                            {pipelineData.runtime.name || pipelineData.runtime.id || 'default'}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-xs text-text-muted mb-1">Tenant ID</p>
+                        <code className="text-sm text-primary-light bg-primary/5 px-2 py-1 rounded">{tenantId}</code>
+                      </div>
+                      <div>
+                        <p className="text-xs text-text-muted mb-2">Permission Profile</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge color="primary">{profile.role}</Badge>
+                          {profile.tools.map(t => <Badge key={t} color="success">{t}</Badge>)}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs text-text-muted mb-2">Plan A — Pre-Execution</p>
+                        <pre className="rounded-lg bg-dark-bg border border-dark-border p-3 text-xs text-text-secondary whitespace-pre-wrap font-mono">{profile.planA || 'Loading...'}</pre>
+                      </div>
+                      <div>
+                        <p className="text-xs text-text-muted mb-2">Plan E — Post-Execution</p>
+                        <pre className="rounded-lg bg-dark-bg border border-dark-border p-3 text-xs text-text-secondary whitespace-pre-wrap font-mono">{profile.planE || 'Loading...'}</pre>
+                      </div>
                     </div>
-                  </div>
-                  <div>
-                    <p className="text-xs text-text-muted mb-2">Plan A — Pre-Execution</p>
-                    <pre className="rounded-lg bg-dark-bg border border-dark-border p-3 text-xs text-text-secondary whitespace-pre-wrap font-mono">{profile.planA || 'Loading...'}</pre>
-                  </div>
-                  <div>
-                    <p className="text-xs text-text-muted mb-2">Plan E — Post-Execution</p>
-                    <pre className="rounded-lg bg-dark-bg border border-dark-border p-3 text-xs text-text-secondary whitespace-pre-wrap font-mono">{profile.planE || 'Loading...'}</pre>
-                  </div>
+                  )}
+
                   <div>
                     <p className="text-xs text-text-muted mb-1">Last Plan E Result</p>
                     <div className={`rounded-lg px-3 py-2 text-sm ${
-                      lastPlanE.includes('PASS') || lastPlanE.includes('PASS') ? 'bg-success/10 text-success'
+                      lastPlanE.includes('PASS') ? 'bg-success/10 text-success'
                       : lastPlanE.includes('BLOCKED') ? 'bg-danger/10 text-danger'
                       : 'bg-dark-bg text-text-muted'
                     }`}>{lastPlanE}</div>
                   </div>
+                </div>
+              )}
+
+              {/* Events Tab */}
+              {activeTab === 'events' && (
+                <div>
+                  <p className="text-xs text-text-muted mb-3">Recent AUDIT# events for tenant {tenantId} (last 5 minutes)</p>
+                  {(eventsData?.events || []).length === 0 ? (
+                    <div className="text-center py-8 text-text-muted">
+                      <Activity size={24} className="mx-auto mb-2 opacity-50" />
+                      <p className="text-sm">No events yet</p>
+                      <p className="text-xs mt-1">Send a message to generate audit events</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-[400px] overflow-y-auto">
+                      {(eventsData?.events || []).map((e: any, i: number) => (
+                        <div key={i} className="flex items-start gap-2 rounded-lg bg-dark-bg/50 px-3 py-2 text-xs hover:bg-dark-bg transition-colors">
+                          <span className="text-text-muted shrink-0 w-16 font-mono">{e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''}</span>
+                          <Badge color={e.eventType === 'agent_invocation' ? 'primary' : e.eventType === 'tool_execution' ? 'success' : e.status === 'blocked' ? 'danger' : 'default'}>
+                            {(e.eventType || e.type || '').replace(/_/g, ' ')}
+                          </Badge>
+                          <span className="text-text-secondary flex-1">{e.detail || e.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -344,35 +468,10 @@ export default function Playground() {
                   <p className="text-xs text-text-muted mb-3">
                     Click to expand and view or edit. USER.md and personal SOUL can be saved directly to S3.
                   </p>
-                  <FileCard
-                    label="SOUL.md (Personal)"
-                    s3Key={`${empId}/workspace/SOUL.md`}
-                    editable
-                    badge="editable"
-                    badgeColor="success"
-                  />
-                  {posId && (
-                    <FileCard
-                      label="SOUL.md (Position)"
-                      s3Key={`_shared/soul/positions/${posId}/SOUL.md`}
-                      editable
-                      badge={posId}
-                      badgeColor="primary"
-                    />
-                  )}
-                  <FileCard
-                    label="USER.md (Preferences)"
-                    s3Key={`${empId}/workspace/USER.md`}
-                    editable
-                    badge="editable"
-                    badgeColor="success"
-                  />
-                  <FileCard
-                    label="MEMORY.md (Memory)"
-                    s3Key={`${empId}/workspace/MEMORY.md`}
-                    badge="read-only"
-                    badgeColor="default"
-                  />
+                  <FileCard label="SOUL.md (Personal)" s3Key={`${empId}/workspace/SOUL.md`} editable badge="editable" badgeColor="success" />
+                  {posId && <FileCard label="SOUL.md (Position)" s3Key={`_shared/soul/positions/${posId}/SOUL.md`} editable badge={posId} badgeColor="primary" />}
+                  <FileCard label="USER.md (Preferences)" s3Key={`${empId}/workspace/USER.md`} editable badge="editable" badgeColor="success" />
+                  <FileCard label="MEMORY.md (Memory)" s3Key={`${empId}/workspace/MEMORY.md`} badge="read-only" badgeColor="default" />
                 </div>
               )}
             </div>

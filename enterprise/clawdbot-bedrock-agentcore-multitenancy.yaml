@@ -334,10 +334,42 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Effect: Allow
+              - Sid: AgentCoreRuntimeOps
+                Effect: Allow
                 Action:
                   - 'bedrock-agentcore:InvokeAgentRuntime'
                   - 'bedrock-agentcore:GetAgentRuntime'
+                  - 'bedrock-agentcore:ListAgentRuntimes'
+                  - 'bedrock-agentcore:CreateAgentRuntime'
+                  - 'bedrock-agentcore:CreateAgentRuntimeEndpoint'
+                  - 'bedrock-agentcore:UpdateAgentRuntime'
+                  - 'bedrock-agentcore:DeleteAgentRuntime'
+                Resource: '*'
+              - Sid: PassRoleForAgentCore
+                Effect: Allow
+                Action:
+                  - 'iam:PassRole'
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${AWS::StackName}-*-execution-role'
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: bedrock-agentcore.amazonaws.com
+              - Sid: ListRolesForSecurityUI
+                Effect: Allow
+                Action:
+                  - 'iam:ListRoles'
+                Resource: '*'
+        - PolicyName: GuardrailManagementPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'bedrock:CreateGuardrail'
+                  - 'bedrock:UpdateGuardrail'
+                  - 'bedrock:DeleteGuardrail'
+                  - 'bedrock:GetGuardrail'
+                  - 'bedrock:ListGuardrails'
+                  - 'bedrock:CreateGuardrailVersion'
                 Resource: '*'
         - PolicyName: ECRAccessPolicy
           PolicyDocument:

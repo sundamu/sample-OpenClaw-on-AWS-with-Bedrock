@@ -68,6 +68,11 @@ else
     mkdir -p "$WORKSPACE" "$WORKSPACE/memory" "$WORKSPACE/skills"
 fi
 
+# Clean output/ directory — Session Storage may have restored old output files.
+# These are already persisted in S3 by the previous session's watchdog sync.
+rm -rf "$WORKSPACE/output" 2>/dev/null
+mkdir -p "$WORKSPACE/output"
+
 # Symlink for backward compat (skill_loader, watchdog sync)
 ln -sfn "$WORKSPACE" /tmp/workspace
 echo "$TENANT_ID" > /tmp/tenant_id
@@ -85,7 +90,7 @@ GATEWAY_TOKEN=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
 export OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN"
 
 sed -e "s|\${AWS_REGION}|${AWS_REGION}|g" \
-    -e "s|\${BEDROCK_MODEL_ID}|${BEDROCK_MODEL_ID:-global.amazon.nova-2-lite-v1:0}|g" \
+    -e "s|\${BEDROCK_MODEL_ID}|${BEDROCK_MODEL_ID:-global.anthropic.claude-sonnet-4-5-20250929-v1:0}|g" \
     /app/openclaw.json > "$OPENCLAW_CONFIG_DIR/openclaw.json"
 echo "[entrypoint] openclaw.json written to $OPENCLAW_CONFIG_DIR/openclaw.json"
 
@@ -228,7 +233,7 @@ echo "[entrypoint] server.py PID=${SERVER_PID}"
 # =============================================================================
 (
     echo "[bg] Pulling workspace from S3..."
-    aws s3 sync "${S3_BASE}/workspace/" "$WORKSPACE/" --quiet 2>/dev/null || true
+    aws s3 sync "${S3_BASE}/workspace/" "$WORKSPACE/" --exclude "output/*" --quiet 2>/dev/null || true
 
     # Detect shared agent: if tenant_id starts with "shared_" or matches a shared agent pattern
     # The tenant router sets SHARED_AGENT_ID env var for shared agents

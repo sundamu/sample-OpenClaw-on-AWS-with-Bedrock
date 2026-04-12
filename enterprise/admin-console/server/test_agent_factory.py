@@ -133,10 +133,10 @@ class TestAgentStatusFromDynamoDB(unittest.TestCase):
             "agents.py should use lastInvocationAt for status")
 
 
-class TestSkillAssignNoEmployeeLoop(unittest.TestCase):
-    """assign_skill_to_position should NOT loop through employees."""
+class TestSkillAssignHasAuditAndRefresh(unittest.TestCase):
+    """assign_skill_to_position should have audit trail + config bump + force refresh."""
 
-    def test_no_employee_loop(self):
+    def test_has_audit(self):
         agents_path = os.path.join(os.path.dirname(__file__), "routers", "agents.py")
         with open(agents_path) as f:
             content = f.read()
@@ -145,8 +145,12 @@ class TestSkillAssignNoEmployeeLoop(unittest.TestCase):
             self.skipTest("assign_skill_to_position not found")
         next_func = content.find("\ndef ", func_start + 1)
         func_body = content[func_start:next_func] if next_func != -1 else content[func_start:]
-        self.assertNotIn("get_employees", func_body,
-            "assign_skill_to_position should not loop through employees")
+        self.assertIn("create_audit_entry", func_body,
+            "assign_skill_to_position should write audit trail")
+        self.assertIn("bump_config_version", func_body,
+            "assign_skill_to_position should bump config version")
+        self.assertIn("stop_employee_session", func_body,
+            "assign_skill_to_position should force refresh affected employees")
 
 
 class TestSkillKeysCache(unittest.TestCase):
