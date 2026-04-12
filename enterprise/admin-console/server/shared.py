@@ -65,8 +65,13 @@ def ssm_client():
 
 # ── Config version ──────────────────────────────────────────────────────
 def bump_config_version() -> None:
-    """Write a new CONFIG#global-version to DynamoDB.
-    Agent-container/server.py polls this every 5 minutes."""
+    """Write a new CONFIG#global-version to DynamoDB, then immediately
+    notify all running Fargate containers to refresh their workspace cache.
+
+    Two propagation paths:
+    - Fargate (instant): POST /admin/refresh-all to each running tier container
+    - AgentCore (5 min): server.py polls config_version every 5 minutes
+    """
     try:
         import db
         version = datetime.now(timezone.utc).isoformat()
@@ -78,6 +83,32 @@ def bump_config_version() -> None:
         })
     except Exception as e:
         print(f"[config-version] bump failed (non-fatal): {e}")
+
+    # Instant propagation to Fargate containers (fire-and-forget, non-blocking)
+    import threading as _thr_cv
+    _thr_cv.Thread(target=_refresh_all_fargate_tiers, daemon=True).start()
+
+
+def _refresh_all_fargate_tiers() -> None:
+    """POST /admin/refresh-all to every running Fargate tier container.
+    Called after bump_config_version() for instant config propagation."""
+    import requests as _req_refresh
+    tiers = ("standard", "restricted", "engineering", "executive")
+    for tier in tiers:
+        try:
+            endpoint = ssm_client().get_parameter(
+                Name=f"/openclaw/{STACK_NAME}/fargate/tier-{tier}/endpoint"
+            )["Parameter"]["Value"]
+            r = _req_refresh.post(f"{endpoint}/admin/refresh-all", timeout=5)
+            if r.status_code == 200:
+                data = r.json()
+                logger.info("[config-propagation] tier-%s refreshed: %s", tier, data)
+            else:
+                logger.warning("[config-propagation] tier-%s returned %d", tier, r.status_code)
+        except _req_refresh.exceptions.ConnectionError:
+            pass  # tier not running — skip silently
+        except Exception as e:
+            logger.warning("[config-propagation] tier-%s failed: %s", tier, e)
 
 
 # ── StopRuntimeSession helper ──────────────────────────────────────────
