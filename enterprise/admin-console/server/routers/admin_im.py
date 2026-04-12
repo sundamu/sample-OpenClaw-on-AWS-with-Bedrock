@@ -208,6 +208,63 @@ def im_binding_check(channel: str, channelUserId: str):
 
 
 # =========================================================================
+# Fargate Resolution — internal endpoint for H2 Proxy
+# =========================================================================
+
+@router.get("/api/v1/internal/resolve-fargate")
+def resolve_fargate(channel: str = "", channelUserId: str = ""):
+    """Internal endpoint called by H2 Proxy to check if a user should route to Fargate.
+    Resolves: channelUserId → empId → positionId → POS#.deployMode → tier endpoint.
+    No auth required — only accessible from same EC2 (internal network)."""
+    if not channelUserId:
+        return {"endpoint": "", "tier": ""}
+
+    # Resolve emp_id from channelUserId
+    emp_id = channelUserId if channelUserId.startswith("emp-") else ""
+    if not emp_id:
+        m = db.get_user_mapping(channel, channelUserId)
+        if m and m.get("employeeId"):
+            emp_id = m["employeeId"]
+    if not emp_id:
+        return {"endpoint": "", "tier": ""}
+
+    # Get position and check deployMode
+    emp = db.get_employee(emp_id)
+    if not emp:
+        return {"endpoint": "", "tier": ""}
+    pos_id = emp.get("positionId", "")
+    if not pos_id:
+        return {"endpoint": "", "tier": ""}
+    pos = db.get_position(pos_id)
+    if not pos or pos.get("deployMode") != "fargate":
+        return {"endpoint": "", "tier": ""}
+
+    # Resolve tier name
+    tier_name = pos.get("fargateTier", "")
+    if not tier_name:
+        # Derive from runtime assignment
+        routing = db.get_routing_config()
+        runtime_name = routing.get("position_runtime", {}).get(pos_id, "")
+        tier_name = "standard"
+        if runtime_name:
+            rn = runtime_name.lower()
+            for t in ("restricted", "engineering", "executive"):
+                if t in rn:
+                    tier_name = t
+                    break
+
+    # Get tier endpoint from SSM
+    stack = os.environ.get("STACK_NAME", "openclaw")
+    try:
+        ssm = boto3.client("ssm", region_name=GATEWAY_REGION)
+        r = ssm.get_parameter(Name=f"/openclaw/{stack}/fargate/tier-{tier_name}/endpoint")
+        endpoint = r["Parameter"]["Value"]
+        return {"endpoint": endpoint, "tier": tier_name, "empId": emp_id, "positionId": pos_id}
+    except Exception:
+        return {"endpoint": "", "tier": tier_name, "empId": emp_id, "reason": "no_endpoint"}
+
+
+# =========================================================================
 # Test Connection
 # =========================================================================
 

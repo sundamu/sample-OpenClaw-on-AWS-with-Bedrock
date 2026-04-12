@@ -82,15 +82,72 @@ def bump_config_version() -> None:
 
 # ── StopRuntimeSession helper ──────────────────────────────────────────
 def stop_employee_session(emp_id: str) -> dict:
-    """Call Tenant Router /stop-session to force agent workspace refresh."""
+    """Force agent workspace refresh for an employee.
+
+    Two modes based on the employee's position deployMode:
+    - Fargate: POST /admin/refresh to the Fargate container (clears workspace cache,
+      no container restart needed — next invocation re-assembles workspace).
+    - Serverless (AgentCore): POST /stop-session to Tenant Router (kills the microVM,
+      next invocation triggers full cold start).
+    """
+    import requests as _req_stop
+
+    # Check if this employee's position uses Fargate
+    try:
+        import db as _db_stop
+        emp = _db_stop.get_employee(emp_id)
+        if emp:
+            pos_id = emp.get("positionId", "")
+            if pos_id:
+                pos = _db_stop.get_position(pos_id)
+                if pos and pos.get("deployMode") == "fargate":
+                    return _refresh_fargate_agent(emp_id, pos.get("fargateTier", ""))
+    except Exception as e:
+        logger.warning("[stop-session] Fargate check failed, falling back to AgentCore: %s", e)
+
+    # AgentCore mode: call Tenant Router to kill microVM
     router_url = os.environ.get("TENANT_ROUTER_URL", "http://localhost:8090")
     try:
-        import requests as _req_stop
         r = _req_stop.post(f"{router_url}/stop-session",
                           json={"emp_id": emp_id}, timeout=30)
         return r.json() if r.status_code == 200 else {"error": r.text}
     except Exception as e:
         print(f"[stop-session] Failed for {emp_id}: {e}")
+        return {"error": str(e)}
+
+
+def _refresh_fargate_agent(emp_id: str, tier_name: str = "") -> dict:
+    """Refresh a Fargate-hosted agent by calling the container's /admin/refresh endpoint.
+    This clears the workspace assembly cache without restarting the container."""
+    import requests as _req_fg
+
+    # Resolve tier endpoint from SSM
+    if not tier_name:
+        tier_name = "standard"
+    try:
+        endpoint = ssm_client().get_parameter(
+            Name=f"/openclaw/{STACK_NAME}/fargate/tier-{tier_name}/endpoint"
+        )["Parameter"]["Value"]
+    except Exception:
+        # Fallback: try per-agent always-on endpoint
+        try:
+            agent_id = ssm_client().get_parameter(
+                Name=f"/openclaw/{STACK_NAME}/tenants/{emp_id}/always-on-agent"
+            )["Parameter"]["Value"]
+            endpoint = ssm_client().get_parameter(
+                Name=f"/openclaw/{STACK_NAME}/always-on/{agent_id}/endpoint"
+            )["Parameter"]["Value"]
+        except Exception:
+            return {"error": f"No Fargate endpoint found for tier {tier_name}"}
+
+    try:
+        r = _req_fg.post(f"{endpoint}/admin/refresh",
+                        json={"emp_id": emp_id}, timeout=10)
+        result = r.json() if r.status_code == 200 else {"error": r.text}
+        logger.info("[refresh-fargate] %s → %s: %s", emp_id, endpoint, result)
+        return result
+    except Exception as e:
+        logger.warning("[refresh-fargate] Failed for %s: %s", emp_id, e)
         return {"error": str(e)}
 
 

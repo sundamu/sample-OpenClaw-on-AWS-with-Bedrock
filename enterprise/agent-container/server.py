@@ -967,6 +967,33 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
         else:
             self._respond(404, {"error": "not found"})
 
+    def do_DELETE(self):
+        """DELETE /admin/refresh/{emp_id} — clear assembled workspace cache for one employee.
+        Fargate-aware alternative to stop_employee_session (which kills the microVM).
+        After this call, the next /invocations for that employee will re-run
+        workspace_assembler (fresh SOUL, permissions, KB, skills) without restarting the container."""
+        if self.path.startswith("/admin/refresh/"):
+            emp_id = self.path.split("/admin/refresh/")[1].strip("/")
+            if not emp_id:
+                self._respond(400, {"error": "emp_id required"})
+                return
+            evicted = []
+            with _assembly_lock:
+                to_remove = [t for t in _assembled_tenants if emp_id in t]
+                for t in to_remove:
+                    _assembled_tenants.discard(t)
+                    evicted.append(t)
+            logger.info("Admin refresh: evicted %d cached tenants for %s: %s", len(evicted), emp_id, evicted)
+            self._respond(200, {"refreshed": True, "empId": emp_id, "evicted": evicted})
+        elif self.path == "/admin/refresh-all":
+            with _assembly_lock:
+                count = len(_assembled_tenants)
+                _assembled_tenants.clear()
+            logger.info("Admin refresh-all: evicted %d cached tenants", count)
+            self._respond(200, {"refreshed": True, "evictedCount": count})
+        else:
+            self._respond(404, {"error": "not found"})
+
     def _handle_gateway_dashboard(self):
         """Run `openclaw dashboard --no-open` and return the dashboard URL.
         This generates a fresh pairing token each time, so the caller can
@@ -1033,6 +1060,29 @@ class AgentCoreHandler(BaseHTTPRequestHandler):
             self._respond(500, {"error": str(e)})
 
     def do_POST(self):
+        # Admin refresh via POST (for clients that can't send DELETE)
+        if self.path.startswith("/admin/refresh"):
+            body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            try:
+                payload = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                payload = {}
+            emp_id = payload.get("emp_id", "")
+            if self.path == "/admin/refresh-all" or not emp_id:
+                with _assembly_lock:
+                    count = len(_assembled_tenants)
+                    _assembled_tenants.clear()
+                self._respond(200, {"refreshed": True, "evictedCount": count})
+            else:
+                evicted = []
+                with _assembly_lock:
+                    to_remove = [t for t in _assembled_tenants if emp_id in t]
+                    for t in to_remove:
+                        _assembled_tenants.discard(t)
+                        evicted.append(t)
+                self._respond(200, {"refreshed": True, "empId": emp_id, "evicted": evicted})
+            return
+
         if self.path != "/invocations":
             self._respond(404, {"error": "not found"})
             return

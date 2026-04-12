@@ -375,11 +375,105 @@ function tryTenantRouterWithTimeout(channel, userId, message, timeoutMs) {
 }
 
 // =============================================================================
-// Core Request Router (fast-path + warm path)
+// Fargate Direct Forwarding (bypasses Tenant Router for Fargate-hosted agents)
+// =============================================================================
+
+// Cache: empId → { endpoint, tier, expiresAt }
+const _fargateEndpointCache = new Map();
+const _FARGATE_CACHE_TTL = 60_000; // 60 seconds
+
+/**
+ * Resolve Fargate endpoint for a user. Calls Admin Console internal API.
+ * Returns { endpoint: "http://10.0.x.x:8080", tier: "executive" } or null.
+ */
+async function resolveFargateEndpoint(channel, userId) {
+  const cacheKey = `fargate__${userId}`;
+  const cached = _fargateEndpointCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.endpoint ? cached : null;
+  }
+
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1', port: 8099,
+        path: `/api/v1/internal/resolve-fargate?channel=${encodeURIComponent(channel)}&channelUserId=${encodeURIComponent(userId)}`,
+        method: 'GET', timeout: 5000,
+      }, (res) => {
+        let data = '';
+        res.on('data', c => data += c);
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); } catch { resolve(null); }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+      req.end();
+    });
+
+    if (result && result.endpoint) {
+      const entry = { endpoint: result.endpoint, tier: result.tier || '', expiresAt: Date.now() + _FARGATE_CACHE_TTL };
+      _fargateEndpointCache.set(cacheKey, entry);
+      return entry;
+    }
+    _fargateEndpointCache.set(cacheKey, { endpoint: '', tier: '', expiresAt: Date.now() + _FARGATE_CACHE_TTL });
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Forward a message directly to a Fargate container's /invocations endpoint.
+ * This bypasses Tenant Router entirely — the container's server.py handles
+ * workspace assembly, guardrail, audit, usage tracking.
+ */
+function forwardToFargateContainer(endpoint, channel, userId, message) {
+  return new Promise((resolve, reject) => {
+    // Build tenant_id in the same format as derive_tenant_id in tenant_router.py
+    const channelShort = { whatsapp: 'wa', telegram: 'tg', discord: 'dc', slack: 'sl',
+      teams: 'ms', imessage: 'im', googlechat: 'gc', webchat: 'web',
+      playground: 'pgnd', twin: 'twin', portal: 'port' }[channel] || channel.slice(0, 4);
+    const tenantId = `${channelShort}__${userId}__fargate`;
+
+    const url = new URL('/invocations', endpoint);
+    const payload = JSON.stringify({ sessionId: tenantId, tenant_id: tenantId, message });
+
+    const req = http.request(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+        'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': tenantId,
+      },
+      timeout: 300000,
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          const text = result.response || 'No response';
+          resolve(String(text));
+        } catch (e) {
+          resolve(data || 'Parse error');
+        }
+      });
+    });
+    req.on('error', e => reject(e));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Fargate container timeout')); });
+    req.write(payload);
+    req.end();
+  });
+}
+
+// =============================================================================
+// Core Request Router (fast-path + warm path + Fargate direct)
 // =============================================================================
 
 /**
  * Route a request based on tenant state:
+ *   Fargate -> forward directly to Fargate container (no cold start, no Tenant Router)
  *   warm    -> forward to Tenant Router (full OpenClaw, ~10s)
  *   warming -> try Tenant Router with timeout, fallback to fast-path
  *   cold    -> fast-path Bedrock (~2-3s) + async prewarm
@@ -389,6 +483,20 @@ async function routeRequest(channel, userId, userText) {
   const status = getTenantStatus(tenantKey);
 
   log(`Route: ${tenantKey} status=${status} fast_path=${FAST_PATH_ENABLED}`);
+
+  // --- Fargate: if employee's position uses Fargate, go direct (no cold start) ---
+  const fargate = await resolveFargateEndpoint(channel, userId);
+  if (fargate) {
+    log(`Fargate direct: ${tenantKey} → ${fargate.tier} (${fargate.endpoint})`);
+    try {
+      const text = await forwardToFargateContainer(fargate.endpoint, channel, userId, userText);
+      setTenantStatus(tenantKey, 'warm');
+      return text;
+    } catch (e) {
+      log(`Fargate direct failed for ${tenantKey}: ${e.message}, falling back to Tenant Router`);
+      // Fall through to normal routing
+    }
+  }
 
   // --- Warm: microVM is running, use full OpenClaw pipeline ---
   if (status === 'warm') {

@@ -21,6 +21,74 @@ from shared import require_role, GATEWAY_REGION
 router = APIRouter(tags=["playground"])
 
 
+def _resolve_fargate_for_playground(emp_id: str) -> str:
+    """Check if employee's position uses Fargate and return the container endpoint."""
+    try:
+        emp = db.get_employee(emp_id)
+        if not emp:
+            return ""
+        pos_id = emp.get("positionId", "")
+        if not pos_id:
+            return ""
+        pos = db.get_position(pos_id)
+        if not pos or pos.get("deployMode") != "fargate":
+            return ""
+        tier_name = pos.get("fargateTier", "standard")
+        # Derive tier from runtime assignment if not set
+        if not pos.get("fargateTier"):
+            routing = db.get_routing_config()
+            runtime_name = routing.get("position_runtime", {}).get(pos_id, "")
+            if runtime_name:
+                rn = runtime_name.lower()
+                for t in ("restricted", "engineering", "executive"):
+                    if t in rn:
+                        tier_name = t
+                        break
+        import boto3 as _b3pg
+        stack = os.environ.get("STACK_NAME", "openclaw")
+        ssm = _b3pg.client("ssm", region_name=GATEWAY_REGION)
+        r = ssm.get_parameter(Name=f"/openclaw/{stack}/fargate/tier-{tier_name}/endpoint")
+        return r["Parameter"]["Value"]
+    except Exception:
+        return ""
+
+
+def _invoke_fargate_live(endpoint: str, emp_id: str, message: str, tenant_id: str, profile: dict) -> dict:
+    """Invoke a Fargate container directly for Playground live mode."""
+    import requests as _req_fg
+    session_id = f"pgnd__{emp_id}__fargate"
+    try:
+        r = _req_fg.post(f"{endpoint}/invocations", json={
+            "sessionId": session_id,
+            "tenant_id": session_id,
+            "message": message,
+        }, timeout=180)
+        if r.status_code == 200:
+            data = r.json()
+            return {
+                "response": data.get("response", "No response"),
+                "tenant_id": tenant_id,
+                "profile": profile,
+                "plan_a": profile.get("planA", ""),
+                "plan_e": f"✅ PASS — Fargate direct (tier endpoint: {endpoint})",
+                "source": "fargate",
+                "model": data.get("model", ""),
+            }
+        return {
+            "response": f"Fargate returned {r.status_code}: {r.text[:200]}",
+            "tenant_id": tenant_id, "profile": profile,
+            "plan_a": profile.get("planA", ""),
+            "plan_e": f"ERROR — Fargate {r.status_code}", "source": "error",
+        }
+    except Exception as e:
+        return {
+            "response": f"Fargate call failed: {e}",
+            "tenant_id": tenant_id, "profile": profile,
+            "plan_a": profile.get("planA", ""),
+            "plan_e": "ERROR — Fargate unreachable", "source": "error",
+        }
+
+
 class PlaygroundMessage(BaseModel):
     tenant_id: str
     message: str
@@ -227,6 +295,12 @@ def playground_send(body: PlaygroundMessage, authorization: str = Header(default
         if emp_id == "admin":
             return _admin_assistant_direct(body.message)
 
+        # Check if employee's position uses Fargate — route directly to container
+        fargate_endpoint = _resolve_fargate_for_playground(emp_id)
+        if fargate_endpoint:
+            return _invoke_fargate_live(fargate_endpoint, emp_id, body.message, body.tenant_id, profile)
+
+        # AgentCore mode: route through Tenant Router
         router_url = os.environ.get("TENANT_ROUTER_URL", "http://localhost:8090")
         try:
             import requests as _req
