@@ -33,7 +33,13 @@ RUN npm install -g openclaw@2026.3.24 clawhub@latest
 # Install enterprise built-in skills (Layer 1)
 # These are available to all tenants with zero cold-start overhead.
 # To customize: override SKILLS_PREINSTALL at build time.
-ARG SKILLS_PREINSTALL="jina-reader deep-research-pro transcript gog summarize notion github himalaya slack firecrawl self-improving-agent api-gateway skill-vetter"
+# Only install skills that are assigned to positions and work without personal API keys.
+# PRD-tools-skills-market Section 10: keep deep-research-pro + self-improving-agent.
+# Add jina-reader (used by deep-research-pro internally) and skill-vetter (security review).
+# Everything else needs personal credentials (github, notion, himalaya, gog, firecrawl, slack)
+# or has no assignment (transcript, api-gateway, summarize).
+# Fewer skills = faster Gateway startup (fewer tool definitions to register with Bedrock).
+ARG SKILLS_PREINSTALL="deep-research-pro self-improving-agent jina-reader skill-vetter"
 RUN HOME=/root && mkdir -p /root/.openclaw && \
     for skill in $SKILLS_PREINSTALL; do \
       for attempt in 1 2 3; do \
