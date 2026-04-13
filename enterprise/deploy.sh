@@ -307,6 +307,9 @@ if [ -n "$EXISTING_RUNTIME" ] && [ "$EXISTING_RUNTIME" != "UNKNOWN" ]; then
     --agent-runtime-artifact "{\"containerConfiguration\":{\"containerUri\":\"${ECR_URI}:latest\"}}" \
     --role-arn "$EXECUTION_ROLE_ARN" \
     --network-configuration '{"networkMode":"PUBLIC"}' \
+    --environment-variables \
+      STACK_NAME="${STACK_NAME}",AWS_REGION="${REGION}",S3_BUCKET="${S3_BUCKET}",\
+BEDROCK_MODEL_ID="${MODEL}",DYNAMODB_TABLE="${DYNAMODB_TABLE}",DYNAMODB_REGION="${DYNAMODB_REGION}" \
     --region "$REGION" &>/dev/null || warn "  Runtime update failed — may need manual update in console"
   RUNTIME_ID="$EXISTING_RUNTIME"
 else
@@ -347,9 +350,15 @@ UPDATED=0
 for RT_ID in $ALL_RUNTIMES; do
   [ -z "$RT_ID" ] && continue
   [ "$RT_ID" = "$RUNTIME_ID" ] && continue  # already updated above
+  # Get existing role for this runtime (each tier may have a different execution role)
+  RT_ROLE=$(aws bedrock-agentcore-control get-agent-runtime \
+    --agent-runtime-id "$RT_ID" --query 'roleArn' --output text \
+    --region "$REGION" 2>/dev/null || echo "$EXECUTION_ROLE_ARN")
   aws bedrock-agentcore-control update-agent-runtime \
     --agent-runtime-id "$RT_ID" \
     --agent-runtime-artifact "{\"containerConfiguration\":{\"containerUri\":\"${ECR_URI}:latest\"}}" \
+    --role-arn "$RT_ROLE" \
+    --network-configuration '{"networkMode":"PUBLIC"}' \
     --region "$REGION" &>/dev/null && UPDATED=$((UPDATED+1)) || true
 done
 [ $UPDATED -gt 0 ] && info "  Updated $UPDATED additional runtime(s) to new image"
