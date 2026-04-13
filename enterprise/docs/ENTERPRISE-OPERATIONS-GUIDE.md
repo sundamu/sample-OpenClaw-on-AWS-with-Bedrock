@@ -14,7 +14,7 @@
 | AWS Credentials | `aws sts get-caller-identity` | Must succeed |
 | Bedrock Model Access | AWS Console → Bedrock → Model access | Enable your chosen model |
 
-**Bedrock Model Access:** Before deploying, go to [Amazon Bedrock Console](https://console.aws.amazon.com/bedrock/home#/modelaccess) → "Manage model access" → Enable at least `Amazon Nova Lite` (default model). Without this, agents will return empty responses.
+**Bedrock Model Access:** Before deploying, go to [Amazon Bedrock Console](https://console.aws.amazon.com/bedrock/home#/modelaccess) → "Manage model access" → Enable models for your 4 tiers. Recommended: MiniMax M2.5 (Standard), DeepSeek V3.2 (Restricted), Claude Sonnet 4.5 (Engineering), Claude Sonnet 4.6 (Executive).
 
 **IAM Permissions** for the deploying user: CloudFormation, EC2, S3, ECR, SSM, DynamoDB, ECS, EFS, IAM (create roles), Bedrock, CloudWatch Logs.
 
@@ -36,7 +36,7 @@ Edit `.env` — only 3 values are required:
 | `STACK_NAME` | Yes | `openclaw` | Names all resources. Must be unique per account/region. |
 | `REGION` | Yes | `us-east-1` | Any region with Bedrock + AgentCore (us-east-1, us-west-2, ap-northeast-1, etc.). |
 | `ADMIN_PASSWORD` | Yes | — | Shared login password for all admin accounts. |
-| `MODEL` | No | `global.amazon.nova-2-lite-v1:0` | Bedrock model ID. |
+| `MODEL` | No | `minimax.minimax-m2.5` | Default Bedrock model ID (Standard tier). Each tier can use a different model. |
 | `INSTANCE_TYPE` | No | `c7g.large` | `t4g.small` for testing, `c7g.large` for production. |
 | `DYNAMODB_TABLE` | No | = STACK_NAME | **Must equal STACK_NAME** (IAM policy constraint). Leave empty. |
 | `DYNAMODB_REGION` | No | = REGION | Can differ from main REGION if needed. |
@@ -345,7 +345,7 @@ grep STACK_NAME /etc/openclaw/env
 ```bash
 # Test Bedrock access from EC2
 aws bedrock-runtime invoke-model \
-  --model-id "global.amazon.nova-2-lite-v1:0" \
+  --model-id "minimax.minimax-m2.5" \
   --body '{"messages":[{"role":"user","content":[{"text":"hello"}]}]}' \
   --region us-east-1 /dev/stdout 2>&1 | head -5
 ```
@@ -434,18 +434,36 @@ Amazon Bedrock (model inference)
 
 **Data stores:** DynamoDB (org data, audit), S3 (workspaces, SOUL, skills), SSM (secrets, config), EFS (always-on persistence)
 
+**4-Tier Runtime Model (production):**
+
+| Tier | Model | Guardrail | Positions |
+|------|-------|-----------|-----------|
+| Standard | MiniMax M2.5 | Moderate (PII) | AE, CSM, HR, PM |
+| Restricted | DeepSeek V3.2 | Strict (topic + PII) | FA, Legal |
+| Engineering | Claude Sonnet 4.5 | None | SDE, DevOps, QA |
+| Executive | Claude Sonnet 4.6 | None | Exec, SA |
+
+**Key Architecture Decisions:**
+- **No Session Storage** — every cold start rebuilds workspace from S3. Eliminates identity loss, stale KB, 1GB space risk.
+- **Dual mode** — AgentCore (serverless, cold start 25s) or Fargate (always-on, 0s cold start). Per-position toggle.
+- **Agent knows its S3 path** — workspace_assembler injects S3 bucket/path into SOUL.md context, enabling autonomous file upload.
+- **ThreadingMixIn** — server.py + tenant_router.py use multi-threaded HTTP server. Eliminates 502 from healthcheck blocking.
+
 ---
 
 ## 8. Cost Estimates
 
 | Component | Monthly Cost | Notes |
 |-----------|-------------|-------|
-| EC2 c7g.large | ~$60 | Gateway + admin console |
-| Bedrock Nova Lite | ~$0.30/employee | Based on ~500 messages/month |
+| EC2 c7g.large | ~$60 | Admin Console + Gateway (IM relay) |
+| Bedrock (4-tier models) | ~$2-15/employee | MiniMax M2.5 cheapest, Sonnet 4.6 most expensive |
 | DynamoDB | ~$5 | On-demand, scales with usage |
 | S3 | ~$1 | Workspace storage |
-| AgentCore | Usage-based | Per-session pricing |
-| **Total (30 employees)** | **~$75/month** | vs $900/month for ChatGPT Team |
+| AgentCore (serverless) | Usage-based | Per-session, cold start 25s |
+| Fargate (always-on) | ~$16-31/tier/month | 4 tiers ≈ $73/month, 0s cold start |
+| EFS | ~$0.30/GB/month | Fargate workspace persistence |
+| **Total (30 emp, AgentCore)** | **~$80/month** | Serverless mode |
+| **Total (30 emp, Fargate)** | **~$145/month** | Always-on mode, instant response |
 
 ---
 
